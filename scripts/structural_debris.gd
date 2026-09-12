@@ -94,6 +94,7 @@ func _receive_energy(
         direction: Vector3,
         impulse: float
 ) -> void:
+    var plastic_before := plastic_strain
     toughness = maxf(0.0, toughness - damage)
     plastic_strain = clampf(
         plastic_strain + damage / 900.0,
@@ -119,6 +120,40 @@ func _receive_energy(
         global_position,
         direction,
         clampf(damage / 24.0, 0.5, 3.4)
+    )
+    _emit_physical_event(
+        impulse,
+        damage,
+        plastic_strain - plastic_before
+    )
+
+func _emit_physical_event(
+        impulse: float,
+        damage: float,
+        plastic_delta: float
+) -> void:
+    if not is_inside_tree():
+        return
+    var extent := maxf(
+        piece_size.x,
+        maxf(piece_size.y, piece_size.z)
+    )
+    get_tree().call_group(
+        "physical_event_listener",
+        "physical_event",
+        {
+            "type": "debris_impact",
+            "position": global_position,
+            "impulse": maxf(impulse, damage * mass * 0.05),
+            "mass": mass,
+            "fracture": clampf(
+                plastic_delta * 8.0 + damage / 180.0,
+                0.0,
+                1.0
+            ),
+            "radius": extent,
+            "novelty": clampf(0.55 + damage / 120.0, 0.55, 1.0)
+        }
     )
 
 func get_load_profile() -> Dictionary:
@@ -153,7 +188,9 @@ func _brace_quality() -> float:
         1.0
     )
     var vertical := absf(_long_axis_world().dot(Vector3.UP))
-    var diagonal := sin(acos(clampf(vertical, 0.0, 1.0)) * 2.0)
+    var diagonal := sin(
+        acos(clampf(vertical, 0.0, 1.0)) * 2.0
+    )
     diagonal = absf(diagonal)
     var orientation_quality := clampf(
         0.34 + diagonal * 0.66,
@@ -176,9 +213,15 @@ func _brace_quality() -> float:
 
 func _long_axis_world() -> Vector3:
     var local_axis := Vector3.RIGHT
-    if piece_size.y >= piece_size.x and piece_size.y >= piece_size.z:
+    if (
+        piece_size.y >= piece_size.x
+        and piece_size.y >= piece_size.z
+    ):
         local_axis = Vector3.UP
-    elif piece_size.z >= piece_size.x and piece_size.z >= piece_size.y:
+    elif (
+        piece_size.z >= piece_size.x
+        and piece_size.z >= piece_size.y
+    ):
         local_axis = Vector3.BACK
     return (global_basis * local_axis).normalized()
 
