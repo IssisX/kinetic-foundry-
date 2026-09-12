@@ -37,14 +37,28 @@ func _refine_proportions(rig) -> void:
             var mesh_child := child as MeshInstance3D
             if mesh_child.mesh is SphereMesh:
                 if mesh_child.position.y > 0.36:
-                    mesh_child.scale *= Vector3(0.88, 0.90, 0.88)
-                    mesh_child.position.y -= 0.012
+                    # Hardhat - materially smaller than the old toy-like dome.
+                    mesh_child.scale *= Vector3(0.78, 0.82, 0.78)
+                    mesh_child.position.y -= 0.025
                 else:
-                    mesh_child.scale *= Vector3(0.95, 0.97, 0.95)
+                    # Human head ratio instead of bobble-head ratio.
+                    mesh_child.scale *= Vector3(0.82, 0.87, 0.82)
             elif mesh_child.mesh is CylinderMesh and mesh_child.position.y > 0.30:
-                mesh_child.scale *= Vector3(0.89, 0.88, 0.89)
+                mesh_child.scale *= Vector3(0.79, 0.78, 0.79)
             elif mesh_child.mesh is CapsuleMesh and mesh_child.position.y > 0.30:
-                mesh_child.scale *= Vector3(0.88, 0.82, 0.86)
+                mesh_child.scale *= Vector3(0.76, 0.74, 0.76)
+
+        # Minimal facial planes keep the procedural heads reading as people at
+        # combat-camera distance without texture assets.
+        for eye_x in [-0.068, 0.068]:
+            var eye := GeomUtil.sphere_mesh(0.020, Color(0.035, 0.040, 0.038))
+            eye.scale = Vector3(1.0, 0.70, 0.45)
+            eye.position = Vector3(eye_x, 0.29, -0.192)
+            head_root.add_child(eye)
+        var nose := GeomUtil.capsule_mesh(0.026, 0.085, Color(0.54, 0.40, 0.32))
+        nose.rotation.x = PI * 0.5
+        nose.position = Vector3(0.0, 0.245, -0.210)
+        head_root.add_child(nose)
 
     for arm_key in ["arm_l", "arm_r"]:
         var arm = rig.get(arm_key)
@@ -54,9 +68,9 @@ func _refine_proportions(rig) -> void:
             if child is MeshInstance3D:
                 var mesh_child := child as MeshInstance3D
                 if mesh_child.mesh is SphereMesh:
-                    mesh_child.scale *= Vector3(0.84, 0.90, 0.84)
+                    mesh_child.scale *= Vector3(0.72, 0.80, 0.72)
                 elif mesh_child.mesh is CapsuleMesh:
-                    mesh_child.scale *= Vector3(0.92, 1.03, 0.92)
+                    mesh_child.scale *= Vector3(0.88, 1.05, 0.88)
         var elbow := arm.get_node_or_null("Elbow") as Node3D
         if elbow != null:
             for child in elbow.get_children():
@@ -64,10 +78,10 @@ func _refine_proportions(rig) -> void:
                     continue
                 var mesh_child := child as MeshInstance3D
                 if mesh_child.mesh is SphereMesh:
-                    var factor := 0.78 if mesh_child.position.y > -0.20 else 0.84
+                    var factor := 0.52 if mesh_child.position.y > -0.20 else 0.70
                     mesh_child.scale *= Vector3(factor, factor, factor)
                 elif mesh_child.mesh is CapsuleMesh:
-                    mesh_child.scale *= Vector3(0.91, 1.04, 0.91)
+                    mesh_child.scale *= Vector3(0.87, 1.06, 0.87)
 
     for leg_key in ["leg_l", "leg_r"]:
         var leg = rig.get(leg_key)
@@ -75,7 +89,7 @@ func _refine_proportions(rig) -> void:
             continue
         for child in leg.get_children():
             if child is MeshInstance3D and (child as MeshInstance3D).mesh is CapsuleMesh:
-                (child as MeshInstance3D).scale *= Vector3(0.93, 1.03, 0.93)
+                (child as MeshInstance3D).scale *= Vector3(0.89, 1.05, 0.89)
         var knee := leg.get_node_or_null("Knee") as Node3D
         if knee != null:
             for child in knee.get_children():
@@ -83,9 +97,9 @@ func _refine_proportions(rig) -> void:
                     continue
                 var mesh_child := child as MeshInstance3D
                 if mesh_child.mesh is SphereMesh:
-                    mesh_child.scale *= Vector3(0.80, 0.80, 0.80)
+                    mesh_child.scale *= Vector3(0.56, 0.56, 0.56)
                 elif mesh_child.mesh is CapsuleMesh and mesh_child.position.y < -0.10:
-                    mesh_child.scale *= Vector3(0.92, 1.03, 0.92)
+                    mesh_child.scale *= Vector3(0.88, 1.06, 0.88)
 
 func _decorate_player(rig) -> void:
     if rig.has_meta("player_detail"):
@@ -95,8 +109,6 @@ func _decorate_player(rig) -> void:
     var arm_l = rig.get("arm_l")
     var arm_r = rig.get("arm_r")
     if torso != null:
-        # Rounded harness pack - avoids the rectangular backpack silhouette that
-        # made the player read like a toy minifigure from the gameplay camera.
         var back := GeomUtil.capsule_mesh(0.20, 0.52, Color(0.09, 0.11, 0.105))
         back.scale = Vector3(1.25, 1.0, 0.62)
         back.position = Vector3(0.0, 0.34, 0.30)
