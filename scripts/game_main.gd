@@ -118,7 +118,7 @@ func _build_gameplay() -> void:
     player.configure(hud, camera_rig)
     player.request_machine_entry.connect(_on_player_use)
     camera_rig.set_target(player)
-    camera_rig.set_on_foot_profile(6.25, 2.30, 72.0)
+    camera_rig.set_on_foot_profile(8.60, 1.72, 74.0)
 
     excavator = ExcavatorScene.new()
     excavator.position = Vector3(4.0, -0.17, -3.0)
@@ -183,7 +183,7 @@ func _on_machine_entered(machine) -> void:
 
 func _on_machine_exited(_machine) -> void:
     camera_rig.exit_machine_view(player)
-    camera_rig.set_on_foot_profile(6.25, 2.30, 72.0)
+    camera_rig.set_on_foot_profile(8.60, 1.72, 74.0)
     _retarget_enemies(player)
     _reclaim_cooldown = 2.8
     if hud != null:
@@ -201,14 +201,9 @@ func _on_machine_disabled(machine) -> void:
     _retarget_enemies(player)
 
 func _on_structure_collapsed_camera() -> void:
-    if camera_rig == null or structure == null:
-        return
-    var focus: Vector3 = (
-        structure.global_position + Vector3.UP * 2.4
-    )
-    if structure.deck != null and is_instance_valid(structure.deck):
-        focus = structure.deck.global_position
-    camera_rig.compose_collapse(focus, 11.0)
+    # Structural collapse now publishes one authoritative physical event;
+    # camera and audio both consume that event instead of receiving bespoke calls.
+    pass
 
 func _update_interaction_prompt() -> void:
     if hud == null or not hud.has_method("set_interaction_hint") or player == null or excavator == null:
