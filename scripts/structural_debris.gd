@@ -123,13 +123,19 @@ func _receive_energy(
 
 func get_load_profile() -> Dictionary:
     var velocity_sq := linear_velocity.length_squared()
+    var long_axis := _long_axis_world()
+    var vertical_alignment := absf(long_axis.dot(Vector3.UP))
+    var settled := _settled_factor()
     return {
         "mass": mass,
         "size": piece_size,
         "kinetic_energy": 0.5 * mass * velocity_sq,
         "brace_quality": _brace_quality(),
         "plastic_strain": plastic_strain,
-        "source": source_tag
+        "source": source_tag,
+        "long_axis": long_axis,
+        "vertical_alignment": vertical_alignment,
+        "settled_factor": settled
     }
 
 func _brace_quality() -> float:
@@ -141,4 +147,46 @@ func _brace_quality() -> float:
         0.08,
         minf(piece_size.x, minf(piece_size.y, piece_size.z))
     )
-    return clampf(longest / shortest / 12.0, 0.15, 1.0)
+    var slenderness := clampf(
+        longest / shortest / 12.0,
+        0.15,
+        1.0
+    )
+    var vertical := absf(_long_axis_world().dot(Vector3.UP))
+    var diagonal := sin(acos(clampf(vertical, 0.0, 1.0)) * 2.0)
+    diagonal = absf(diagonal)
+    var orientation_quality := clampf(
+        0.34 + diagonal * 0.66,
+        0.34,
+        1.0
+    )
+    var strain_quality := clampf(
+        1.0 - plastic_strain * 2.4,
+        0.42,
+        1.0
+    )
+    return clampf(
+        slenderness
+        * orientation_quality
+        * _settled_factor()
+        * strain_quality,
+        0.05,
+        1.0
+    )
+
+func _long_axis_world() -> Vector3:
+    var local_axis := Vector3.RIGHT
+    if piece_size.y >= piece_size.x and piece_size.y >= piece_size.z:
+        local_axis = Vector3.UP
+    elif piece_size.z >= piece_size.x and piece_size.z >= piece_size.y:
+        local_axis = Vector3.BACK
+    return (global_basis * local_axis).normalized()
+
+func _settled_factor() -> float:
+    if held or machine_held:
+        return 0.12
+    var motion := (
+        linear_velocity.length() / 2.6
+        + angular_velocity.length() / 4.2
+    )
+    return clampf(1.0 - motion, 0.12, 1.0)
