@@ -2,7 +2,7 @@ class_name FoundryPlayer
 extends CharacterBody3D
 
 const GeomUtil = preload("res://scripts/geom.gd")
-const HumanoidRigScript = preload("res://scripts/humanoid_rig.gd")
+const HumanoidRigScript = preload("res://scripts/humanoid_motion.gd")
 
 signal request_machine_entry(player)
 

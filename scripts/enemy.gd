@@ -2,7 +2,7 @@ class_name FoundryEnemy
 extends CharacterBody3D
 
 const GeomUtil = preload("res://scripts/geom.gd")
-const HumanoidRigScript = preload("res://scripts/humanoid_rig.gd")
+const HumanoidRigScript = preload("res://scripts/humanoid_motion.gd")
 const ImpactFx = preload("res://scripts/impact_fx.gd")
 
 var target: Node3D
