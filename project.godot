@@ -1,0 +1,34 @@
+; Engine configuration file.
+; Kinetic Foundry vertical slice.
+config_version=5
+
+[application]
+config/name="Kinetic Foundry"
+run/main_scene="res://Main.tscn"
+config/features=PackedStringArray("4.3", "GL Compatibility")
+
+[autoload]
+WorldExtension="*res://scripts/world_extension.gd"
+PopulationDetail="*res://scripts/population_detail.gd"
+AmbientActivity="*res://scripts/ambient_activity.gd"
+Progression="*res://scripts/progression.gd"
+ObjectiveMarker="*res://scripts/objective_marker.gd"
+DeathDirector="*res://scripts/death_director.gd"
+
+[display/window]
+size/viewport_width=1920
+size/viewport_height=1080
+size/window_width_override=1536
+size/window_height_override=1320
+stretch/mode="canvas_items"
+stretch/aspect="expand"
+handheld/orientation=4
+
+[rendering]
+renderer/rendering_method="gl_compatibility"
+renderer/rendering_method.mobile="gl_compatibility"
+textures/default_filters/use_nearest_mipmap_filter=false
+textures/vram_compression/import_etc2_astc=true
+
+[physics]
+common/physics_ticks_per_second=60
