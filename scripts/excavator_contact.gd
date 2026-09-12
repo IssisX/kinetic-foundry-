@@ -19,6 +19,7 @@ var _stability_longitudinal := 0.0
 var _tip_direction_local := Vector3.ZERO
 var _stability_damage_bank := 0.0
 var _stability_notice_cooldown := 0.0
+var _physical_event_cooldown := 0.0
 
 func get_operator_view_anchor() -> Node3D:
     var anchor := get_node_or_null("OperatorView") as Node3D
@@ -47,6 +48,10 @@ func _physics_process(delta: float) -> void:
     _stability_notice_cooldown = maxf(
         0.0,
         _stability_notice_cooldown - delta
+    )
+    _physical_event_cooldown = maxf(
+        0.0,
+        _physical_event_cooldown - delta
     )
     _update_stability(delta)
     super(delta)
@@ -423,6 +428,45 @@ func _collect_hard_arm_contacts() -> Array[Node]:
             if not contacts.has(collider):
                 contacts.append(collider)
     return contacts
+
+func _react_to_arm_contacts(contacts: Array[Node]) -> void:
+    super(contacts)
+    if _physical_event_cooldown > 0.0 or contacts.is_empty():
+        return
+    var force := get_tool_force()
+    if force < 42.0 and _tool_tip_speed < 1.5:
+        return
+    var held_mass := 0.0
+    if is_holding_load():
+        held_mass = float(held_load.get("mass"))
+    var event_impulse := (
+        force
+        * (1.0 + minf(_tool_tip_speed, 10.0) * 0.38)
+        * (1.0 + held_mass / 520.0)
+    )
+    get_tree().call_group(
+        "physical_event_listener",
+        "physical_event",
+        {
+            "type": "machine_contact",
+            "position": _tool.global_position,
+            "impulse": event_impulse,
+            "mass": MACHINE_EFFECTIVE_MASS + held_mass,
+            "fracture": clampf(
+                _load_path_resistance * 0.35
+                + _actuator_effort * 0.22,
+                0.0,
+                1.0
+            ),
+            "radius": 5.5,
+            "novelty": clampf(
+                0.58 + _contact_age * 0.18,
+                0.58,
+                1.0
+            )
+        }
+    )
+    _physical_event_cooldown = 0.20
 
 func _resolve_arm_contact_pose() -> void:
     var target_boom := boom_angle
