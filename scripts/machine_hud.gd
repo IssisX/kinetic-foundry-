@@ -88,5 +88,13 @@ func _draw_move_zone() -> void:
     if not _machine_mode:
         return
     var s := _ui_scale
-    var center := Vector2(142.0, _view_size.y - 142.0) * s
-    draw_string(ThemeDB.fallback_font, center + Vector2(-63.0, 112.0) * s, "DRIVE / STEER", HORIZONTAL_ALIGNMENT_CENTER, 126.0 * s, maxi(11, int(13.0 * s)), Color(0.92, 0.86, 0.68, 0.88))
+    var center := Vector2(142.0 * s, _view_size.y - 142.0 * s)
+    draw_string(
+        ThemeDB.fallback_font,
+        center + Vector2(-76.0, 110.0) * s,
+        str(_machine_profile.get("left_hint", "DRIVE / STEER")),
+        HORIZONTAL_ALIGNMENT_CENTER,
+        152.0 * s,
+        maxi(11, int(13.0 * s)),
+        Color(0.92, 0.86, 0.68, 0.88)
+    )
