@@ -24,7 +24,7 @@ func damage_support_at(
     if index < 0 or index >= support_health.size():
         return
     var hp_before := support_health[index]
-    super(index, amount, direction)
+    super.damage_support(index, amount, direction)
 
     var removed := maxf(0.0, hp_before - support_health[index])
     if removed <= 0.0:
