@@ -12,6 +12,9 @@ var impact_color := Color(0.72, 0.45, 0.12)
 var source_color := Color(0.25, 0.25, 0.22)
 var source_size := Vector3.ONE
 var barrel_shape := false
+var machine_held := false
+var _saved_linear_damp := 0.0
+var _saved_angular_damp := 0.0
 
 func _ready() -> void:
     add_to_group("physics_prop")
@@ -25,6 +28,8 @@ func configure_box(size: Vector3, color: Color, mass_value: float = 75.0, hp: fl
     health = hp
     source_color = color
     source_size = size
+    set_meta("load_size", size)
+    set_meta("source_tag", "yard_prop")
     barrel_shape = false
     impact_color = color.lightened(0.32)
     add_child(GeomUtil.box_mesh(size, color, 0.86, 0.16))
@@ -35,6 +40,8 @@ func configure_barrel(radius: float, height: float, color: Color, mass_value: fl
     health = hp
     source_color = color
     source_size = Vector3(radius * 2.0, height, radius * 2.0)
+    set_meta("load_size", source_size)
+    set_meta("source_tag", "yard_prop")
     barrel_shape = true
     impact_color = color.lightened(0.38)
     add_child(GeomUtil.cylinder_mesh(radius, height, color, 0.76, 0.22))
@@ -46,11 +53,53 @@ func configure_barrel(radius: float, height: float, color: Color, mass_value: fl
 
 func set_held(value: bool) -> void:
     held = value
+    machine_held = false
     sleeping = false
     freeze = value
     if value:
         linear_velocity = Vector3.ZERO
         angular_velocity = Vector3.ZERO
+    else:
+        _restore_machine_damping()
+
+func set_machine_held(value: bool) -> void:
+    if value:
+        if not machine_held:
+            _saved_linear_damp = linear_damp
+            _saved_angular_damp = angular_damp
+        held = true
+        machine_held = true
+        freeze = false
+        can_sleep = false
+        sleeping = false
+        linear_damp = maxf(linear_damp, 3.2)
+        angular_damp = maxf(angular_damp, 3.8)
+        return
+    held = false
+    machine_held = false
+    freeze = false
+    can_sleep = true
+    sleeping = false
+    _restore_machine_damping()
+
+func _restore_machine_damping() -> void:
+    linear_damp = _saved_linear_damp
+    angular_damp = _saved_angular_damp
+
+func get_load_profile() -> Dictionary:
+    var longest := maxf(source_size.x, maxf(source_size.y, source_size.z))
+    var shortest := maxf(
+        0.08,
+        minf(source_size.x, minf(source_size.y, source_size.z))
+    )
+    return {
+        "mass": mass,
+        "size": source_size,
+        "kinetic_energy": 0.5 * mass * linear_velocity.length_squared(),
+        "brace_quality": clampf(longest / shortest / 12.0, 0.15, 1.0),
+        "plastic_strain": 0.0,
+        "source": "yard_prop"
+    }
 
 func machine_hit(amount: float, direction: Vector3) -> void:
     _receive_impact(amount * 1.35, direction, 14.0)

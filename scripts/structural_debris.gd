@@ -10,6 +10,9 @@ var piece_size := Vector3.ONE
 var toughness := 180.0
 var plastic_strain := 0.0
 var _mesh: MeshInstance3D
+var machine_held := false
+var _saved_linear_damp := 0.0
+var _saved_angular_damp := 0.0
 
 func _ready() -> void:
     add_to_group("physics_prop")
@@ -42,11 +45,38 @@ func configure(
 
 func set_held(value: bool) -> void:
     held = value
+    machine_held = false
     freeze = value
     sleeping = false
     if value:
         linear_velocity = Vector3.ZERO
         angular_velocity = Vector3.ZERO
+    else:
+        _restore_machine_damping()
+
+func set_machine_held(value: bool) -> void:
+    if value:
+        if not machine_held:
+            _saved_linear_damp = linear_damp
+            _saved_angular_damp = angular_damp
+        held = true
+        machine_held = true
+        freeze = false
+        can_sleep = false
+        sleeping = false
+        linear_damp = maxf(linear_damp, 3.6)
+        angular_damp = maxf(angular_damp, 4.2)
+        return
+    held = false
+    machine_held = false
+    freeze = false
+    can_sleep = true
+    sleeping = false
+    _restore_machine_damping()
+
+func _restore_machine_damping() -> void:
+    linear_damp = _saved_linear_damp
+    angular_damp = _saved_angular_damp
 
 func machine_hit(amount: float, direction: Vector3) -> void:
     _receive_energy(amount, direction, amount * mass * 0.08)

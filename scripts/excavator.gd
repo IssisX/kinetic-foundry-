@@ -5,6 +5,13 @@ const GeomUtil = preload("res://scripts/geom.gd")
 const ImpactFx = preload("res://scripts/impact_fx.gd")
 const VisualBuilder = preload("res://scripts/excavator_visual.gd")
 
+const GRIP_TRAVEL_LIMIT := 3.75
+const GRIP_STIFFNESS := 78.0
+const GRIP_DAMPING := 17.5
+const GRIP_ALIGNMENT := 31.0
+const GRIP_MAX_ACCEL := 118.0
+const GRIP_MAX_TORQUE_PER_KG := 18.0
+
 signal player_entered(machine)
 signal player_exited(machine)
 signal machine_disabled(machine)
@@ -45,6 +52,8 @@ var _tool_tip_last := Vector3.ZERO
 var _tool_tip_velocity := Vector3.ZERO
 var _tool_tip_speed := 0.0
 var _tool_motion_ready := false
+var _grip_force := Vector3.ZERO
+var _grip_stress := 0.0
 
 var _safe_boom_angle := -0.24
 var _safe_stick_angle := 0.42
@@ -111,6 +120,9 @@ func get_tool_force() -> float:
     var load_mass: float = float(held_load.get("mass"))
     var inertia_gain := clampf(load_mass / 310.0, 0.0, 1.35)
     return base_force * (1.0 + inertia_gain * 0.72)
+
+func get_grip_stress() -> float:
+    return _grip_stress
 
 func is_holding_load() -> bool:
     return held_load != null and is_instance_valid(held_load)
@@ -242,7 +254,7 @@ func _physics_process(delta: float) -> void:
     move_and_slide()
     _resolve_arm_contact_pose()
     _update_tool_motion(delta)
-    _update_held_load()
+    _update_held_load(delta)
     _resolve_tool_impacts()
     _update_damage_fx()
     _update_telemetry()
@@ -423,19 +435,80 @@ func _try_grip_load() -> bool:
     if best == null:
         return false
     held_load = best
-    if held_load.has_method("set_held"):
-        held_load.set_held(true)
+    held_load.global_position = _grip_anchor.global_position
+    held_load.global_basis = _grip_anchor.global_basis
+    _set_machine_hold(held_load, true)
     hud.set_context(
         "LOAD CLAMPED // MASS AMPLIFIES IMPACT + BRACING"
     )
     return true
 
-func _update_held_load() -> void:
+func _update_held_load(delta: float = 1.0 / 60.0) -> void:
     if not is_holding_load():
         held_load = null
+        _grip_force = Vector3.ZERO
+        _grip_stress = 0.0
         return
-    held_load.global_position = _grip_anchor.global_position
-    held_load.global_basis = _grip_anchor.global_basis
+    if not (held_load is RigidBody3D):
+        _release_load(false)
+        return
+    var load: RigidBody3D = held_load
+    var displacement := _grip_anchor.global_position - load.global_position
+    if displacement.length() > GRIP_TRAVEL_LIMIT:
+        _set_machine_hold(load, false)
+        held_load = null
+        _grip_force = Vector3.ZERO
+        _grip_stress = 0.0
+        if hud != null:
+            hud.set_context("CLAMP SLIP // LOAD OUT OF TRAVEL")
+        return
+    var desired_velocity := _tool_tip_velocity
+    var relative_velocity := desired_velocity - load.linear_velocity
+    var grip_force := (
+        displacement * load.mass * GRIP_STIFFNESS
+        + relative_velocity * load.mass * GRIP_DAMPING
+    )
+    grip_force = _limit_grip_vector(
+        grip_force,
+        load.mass * GRIP_MAX_ACCEL
+    )
+    load.apply_central_force(grip_force)
+    var align_axis := load.global_basis.z.cross(
+        _grip_anchor.global_basis.z
+    )
+    var torque := (
+        align_axis * load.mass * GRIP_ALIGNMENT
+        - load.angular_velocity * load.mass * 4.5
+    )
+    load.apply_torque(_limit_grip_vector(
+        torque,
+        load.mass * GRIP_MAX_TORQUE_PER_KG
+    ))
+    _grip_force = grip_force
+    _grip_stress = clampf(
+        grip_force.length() / maxf(load.mass * GRIP_MAX_ACCEL, 1.0),
+        0.0,
+        1.0
+    )
+    var horizontal_reaction := Vector3(
+        grip_force.x,
+        0.0,
+        grip_force.z
+    )
+    velocity -= horizontal_reaction * (delta / 6200.0)
+
+func _limit_grip_vector(value: Vector3, max_length: float) -> Vector3:
+    if value.length_squared() <= max_length * max_length:
+        return value
+    return value.normalized() * max_length
+
+func _set_machine_hold(load, value: bool) -> void:
+    if load == null or not is_instance_valid(load):
+        return
+    if load.has_method("set_machine_held"):
+        load.set_machine_held(value)
+    elif load.has_method("set_held"):
+        load.set_held(value)
 
 func _release_load(with_throw: bool) -> void:
     if not is_holding_load():
@@ -443,8 +516,9 @@ func _release_load(with_throw: bool) -> void:
         return
     var load = held_load
     held_load = null
-    if load.has_method("set_held"):
-        load.set_held(false)
+    _set_machine_hold(load, false)
+    _grip_force = Vector3.ZERO
+    _grip_stress = 0.0
     if with_throw and load is RigidBody3D:
         load.linear_velocity = _tool_tip_velocity + velocity * 0.85
         load.angular_velocity = Vector3(_tool_tip_velocity.z, 0.8, -_tool_tip_velocity.x) * 0.16
@@ -490,6 +564,9 @@ func _update_telemetry() -> void:
         get_health_ratio(),
         get_hydraulic_ratio(),
         get_track_ratio(),
-        clampf(get_tool_force() / 130.0, 0.0, 1.0),
+        maxf(
+            clampf(get_tool_force() / 130.0, 0.0, 1.0),
+            _grip_stress
+        ),
         is_holding_load()
     )

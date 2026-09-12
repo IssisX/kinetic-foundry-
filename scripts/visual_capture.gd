@@ -130,7 +130,7 @@ func _stage_excavator_operator_pov() -> void:
     var load = _first_prop()
     if load != null:
         game.excavator.held_load = load
-        load.set_held(true)
+        game.excavator._set_machine_hold(load, true)
         game.excavator._update_held_load()
 
     game.mission.stage = 2
@@ -334,7 +334,7 @@ func _release_capture_load() -> void:
         return
     var load = game.excavator.held_load
     game.excavator.held_load = null
-    load.set_held(false)
+    game.excavator._set_machine_hold(load, false)
     load.linear_velocity = Vector3.ZERO
     load.angular_velocity = Vector3.ZERO
 
