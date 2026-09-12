@@ -1,7 +1,7 @@
 extends Node3D
 
 const GeomUtil = preload("res://scripts/geom.gd")
-const ImpactFx = preload("res://scripts/impact_fx.gd")
+const MaterialFx = preload("res://scripts/material_fx.gd")
 const GatePanelScript = preload("res://scripts/gate_panel.gd")
 
 var panel_health := [120.0, 120.0]
@@ -68,7 +68,7 @@ func damage_panel(index: int, amount: float, direction: Vector3) -> void:
     var panel := panels[index]
     panel.rotation.y += direction.x * amount * 0.0018
     panel.rotation.x -= direction.y * amount * 0.0009
-    ImpactFx.spawn(get_parent(), panel.global_position + Vector3.UP * 0.6, direction, Color(0.92, 0.55, 0.10), clampf(amount / 20.0, 1.0, 3.8), 10)
+    MaterialFx.steel(get_parent(), panel.global_position + Vector3.UP * 0.6, direction, clampf(amount / 18.0, 0.8, 5.0))
     if panel_health[index] <= 0.0:
         _break_panel(index, direction)
     breached = panel_health[0] <= 0.0 or panel_health[1] <= 0.0
@@ -78,6 +78,7 @@ func _break_panel(index: int, direction: Vector3) -> void:
     if not is_instance_valid(old):
         return
     var transform := old.global_transform
+    var break_pos := old.global_position
     old.queue_free()
     var debris := RigidBody3D.new()
     debris.global_transform = transform
@@ -89,3 +90,4 @@ func _break_panel(index: int, direction: Vector3) -> void:
     GeomUtil.add_box_collision(debris, Vector3(4.0, 4.0, 0.24))
     debris.apply_central_impulse(direction.normalized() * 1850.0 + Vector3.UP * 420.0)
     debris.apply_torque_impulse(Vector3(direction.z, 0.7, -direction.x) * 1250.0)
+    MaterialFx.steel(get_parent(), break_pos, direction + Vector3.UP * 0.18, 5.2)
