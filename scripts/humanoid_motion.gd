@@ -308,6 +308,7 @@ func _animate_grounded_walk(
         )
         if _mode == MODE_START:
             _mode = MODE_WALK
+            _reset_acceptance_window()
     phase = _phase * TAU
 
     var right_cycle := _phase
@@ -1179,7 +1180,10 @@ func _apply_death(delta: float, dead: bool) -> void:
         position.y = -0.12 * death_blend
         leg_l.rotation.x *= 1.0 - death_blend * 0.75
         leg_r.rotation.x *= 1.0 - death_blend * 0.75
-    else:
+    elif (
+        not rotation.is_zero_approx()
+        or not position.is_zero_approx()
+    ):
         rotation.z = 0.0
         rotation.x = 0.0
         position.y = 0.0

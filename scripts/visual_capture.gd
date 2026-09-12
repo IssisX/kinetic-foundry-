@@ -304,8 +304,8 @@ func _gait_acceptance_passes(data: Dictionary) -> bool:
         and data.right_stance_fraction < 0.78
         and data.double_support_fraction > 0.06
         and data.double_support_fraction < 0.34
-        and data.max_planted_velocity < 0.045
-        and data.max_ground_error < 0.030
+        and data.max_planted_velocity < 0.012
+        and data.max_ground_error < 0.010
     )
     if not valid:
         push_error(
