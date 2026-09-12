@@ -1,5 +1,10 @@
 extends "res://scripts/excavator.gd"
 
+const MaterialFx = preload("res://scripts/material_fx.gd")
+
+var _hydraulic_fx_budget := 0.0
+var _previous_hydraulic_health := 260.0
+
 func get_operator_view_anchor() -> Node3D:
     return get_node_or_null("OperatorView") as Node3D
 
@@ -17,6 +22,34 @@ func get_control_profile() -> Dictionary:
         "right_hint": "SWING BOOM / LIFT",
         "center_hint": "BUCKET FORCE + LOAD PATH"
     }
+
+func _physics_process(delta: float) -> void:
+    _hydraulic_fx_budget = maxf(0.0, _hydraulic_fx_budget - delta)
+    super(delta)
+
+func _apply_machine_damage(amount: float, direction: Vector3) -> void:
+    var hydraulic_before := hydraulic_health
+    super(amount, direction)
+    var hydraulic_loss := maxf(0.0, hydraulic_before - hydraulic_health)
+
+    if amount >= 10.0:
+        MaterialFx.steel(
+            get_parent(),
+            global_position + Vector3.UP * 1.55 + direction.normalized() * 0.6,
+            direction,
+            clampf(amount / 18.0, 0.6, 4.0)
+        )
+
+    if hydraulic_loss > 2.0 and hydraulic_health < 190.0 and _hydraulic_fx_budget <= 0.0:
+        var rupture_strength := clampf((260.0 - hydraulic_health) / 62.0, 0.8, 4.5)
+        MaterialFx.hydraulic(
+            get_parent(),
+            _boom.to_global(Vector3(0.40, 0.18, -1.6)) if _boom != null else global_position + Vector3.UP * 2.4,
+            direction + Vector3.UP * 0.55,
+            rupture_strength
+        )
+        _hydraulic_fx_budget = lerpf(1.1, 0.35, clampf((190.0 - hydraulic_health) / 150.0, 0.0, 1.0))
+    _previous_hydraulic_health = hydraulic_health
 
 func _collect_hard_arm_contacts() -> Array[Node]:
     var contacts: Array[Node] = []
@@ -96,6 +129,13 @@ func _push_dynamic_arm_contacts() -> void:
                 body.apply_impulse(direction * impulse_mag + Vector3.UP * body.mass * 0.55, contact_offset)
                 body.apply_torque_impulse(Vector3(direction.z, 0.18, -direction.x) * body.mass * minf(speed, 8.0) * 0.28)
 
-    if not affected.is_empty() and player_driver != null and camera_rig != null and camera_rig.has_method("add_machine_impulse"):
-        var local_bump := Vector3(direction.x, minf(speed * 0.035, 0.7), direction.z)
-        camera_rig.add_machine_impulse(clampf(0.010 + speed * 0.0018, 0.012, 0.050), local_bump)
+    if not affected.is_empty():
+        MaterialFx.steel(
+            get_parent(),
+            _tool.global_position,
+            direction,
+            clampf(force / 42.0, 0.7, 3.6)
+        )
+        if player_driver != null and camera_rig != null and camera_rig.has_method("add_machine_impulse"):
+            var local_bump := Vector3(direction.x, minf(speed * 0.035, 0.7), direction.z)
+            camera_rig.add_machine_impulse(clampf(0.010 + speed * 0.0018, 0.012, 0.050), local_bump)
