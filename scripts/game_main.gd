@@ -5,8 +5,9 @@ const EnemyScene = preload("res://scripts/enemy.gd")
 const ExcavatorScene = preload("res://scripts/excavator_contact.gd")
 const StructureScene = preload("res://scripts/structure.gd")
 const CameraRigScene = preload("res://scripts/camera_rig.gd")
-const HudScene = preload("res://scripts/mobile_hud.gd")
+const HudScene = preload("res://scripts/machine_hud.gd")
 const YardScene = preload("res://scripts/industrial_yard.gd")
+const FacilityExpansionScene = preload("res://scripts/facility_expansion.gd")
 const HazardFieldScene = preload("res://scripts/hazard_field.gd")
 const MissionDirectorScene = preload("res://scripts/mission_director.gd")
 const CaptureRunnerScene = preload("res://scripts/visual_capture.gd")
@@ -17,6 +18,7 @@ var player
 var excavator
 var structure
 var yard
+var facility_expansion
 var hazards
 var mission
 
@@ -48,50 +50,55 @@ func _build_environment() -> void:
     var env := Environment.new()
 
     var sky_mat := ProceduralSkyMaterial.new()
-    sky_mat.sky_top_color = Color(0.035, 0.055, 0.075)
-    sky_mat.sky_horizon_color = Color(0.22, 0.20, 0.17)
-    sky_mat.ground_bottom_color = Color(0.018, 0.022, 0.024)
-    sky_mat.ground_horizon_color = Color(0.11, 0.10, 0.085)
-    sky_mat.sun_angle_max = 18.0
-    sky_mat.sun_curve = 0.08
+    sky_mat.sky_top_color = Color(0.16, 0.48, 0.86)
+    sky_mat.sky_horizon_color = Color(0.66, 0.81, 0.96)
+    sky_mat.ground_bottom_color = Color(0.15, 0.17, 0.17)
+    sky_mat.ground_horizon_color = Color(0.46, 0.54, 0.58)
+    sky_mat.sun_angle_max = 12.0
+    sky_mat.sun_curve = 0.06
     var sky := Sky.new()
     sky.sky_material = sky_mat
 
     env.background_mode = Environment.BG_SKY
     env.sky = sky
-    env.background_energy_multiplier = 0.72
+    env.background_energy_multiplier = 1.08
     env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-    env.ambient_light_color = Color(0.40, 0.43, 0.44)
-    env.ambient_light_energy = 0.78
+    env.ambient_light_color = Color(0.72, 0.80, 0.88)
+    env.ambient_light_energy = 0.88
     env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
     env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
     env.fog_enabled = true
-    env.fog_light_color = Color(0.19, 0.19, 0.175)
-    env.fog_light_energy = 0.72
-    env.fog_density = 0.0055
+    env.fog_light_color = Color(0.72, 0.80, 0.86)
+    env.fog_light_energy = 0.50
+    env.fog_density = 0.0015
     env.fog_height = 0.0
-    env.fog_height_density = 0.045
+    env.fog_height_density = 0.018
     world.environment = env
     add_child(world)
 
     var sun := DirectionalLight3D.new()
-    sun.rotation_degrees = Vector3(-49.0, -42.0, 0.0)
-    sun.light_color = Color(1.0, 0.82, 0.64)
-    sun.light_energy = 2.15
+    sun.rotation_degrees = Vector3(-54.0, -34.0, 0.0)
+    sun.light_color = Color(1.0, 0.94, 0.82)
+    sun.light_energy = 2.55
     sun.shadow_enabled = true
-    sun.directional_shadow_max_distance = 70.0
+    sun.directional_shadow_max_distance = 125.0
     add_child(sun)
 
-    var fill := DirectionalLight3D.new()
-    fill.rotation_degrees = Vector3(-28.0, 138.0, 0.0)
-    fill.light_color = Color(0.34, 0.48, 0.62)
-    fill.light_energy = 0.42
-    fill.shadow_enabled = false
-    add_child(fill)
+    var sky_fill := DirectionalLight3D.new()
+    sky_fill.rotation_degrees = Vector3(-32.0, 146.0, 0.0)
+    sky_fill.light_color = Color(0.54, 0.72, 0.96)
+    sky_fill.light_energy = 0.58
+    sky_fill.shadow_enabled = false
+    add_child(sky_fill)
 
 func _build_world() -> void:
     yard = YardScene.new()
     add_child(yard)
+
+    facility_expansion = FacilityExpansionScene.new()
+    add_child(facility_expansion)
+    facility_expansion.configure(yard)
+
     hazards = HazardFieldScene.new()
     add_child(hazards)
 
@@ -107,8 +114,7 @@ func _build_gameplay() -> void:
     player.configure(hud, camera_rig)
     player.request_machine_entry.connect(_on_player_use)
     camera_rig.set_target(player)
-    camera_rig.distance = 8.5
-    camera_rig.height = 2.8
+    camera_rig.set_on_foot_profile(6.25, 2.30, 72.0)
 
     excavator = ExcavatorScene.new()
     excavator.position = Vector3(4.0, -0.17, -3.0)
@@ -155,22 +161,29 @@ func _on_player_use(user) -> void:
         hud.set_interaction_hint("MOVE CLOSER // USE WHEN THE EXCAVATOR IS WITHIN REACH")
 
 func _on_machine_entered(machine) -> void:
-    camera_rig.set_target(machine)
-    camera_rig.distance = 12.2
-    camera_rig.height = 4.4
+    camera_rig.enter_machine_view(machine)
     _retarget_enemies(machine)
     _reclaim_cooldown = 4.0
-    if hud != null and hud.has_method("set_interaction_hint"):
-        hud.set_interaction_hint("LEFT: DRIVE + STEER    RIGHT: SWING + BOOM    CURL / CLAMP / EXIT")
+    if hud != null:
+        if machine.has_method("get_control_profile") and hud.has_method("set_machine_profile"):
+            hud.set_machine_profile(machine.get_control_profile())
+        elif hud.has_method("set_machine_mode"):
+            hud.set_machine_mode(true)
+        if hud.has_method("set_interaction_hint"):
+            hud.set_interaction_hint("DRIVE / STEER    |    WORKING ASSEMBLY DIRECT CONTROL    |    EXIT TO DISMOUNT")
 
 func _on_machine_exited(_machine) -> void:
-    camera_rig.set_target(player)
-    camera_rig.distance = 8.5
-    camera_rig.height = 2.8
+    camera_rig.exit_machine_view(player)
+    camera_rig.set_on_foot_profile(6.25, 2.30, 72.0)
     _retarget_enemies(player)
     _reclaim_cooldown = 2.8
-    if hud != null and hud.has_method("set_interaction_hint"):
-        hud.set_interaction_hint("")
+    if hud != null:
+        if hud.has_method("clear_machine_profile"):
+            hud.clear_machine_profile()
+        elif hud.has_method("set_machine_mode"):
+            hud.set_machine_mode(false)
+        if hud.has_method("set_interaction_hint"):
+            hud.set_interaction_hint("")
 
 func _on_machine_disabled(machine) -> void:
     if machine.player_driver != null:
@@ -182,7 +195,6 @@ func _update_interaction_prompt() -> void:
     if hud == null or not hud.has_method("set_interaction_hint") or player == null or excavator == null:
         return
     if excavator.player_driver != null:
-        hud.set_interaction_hint("LEFT: DRIVE + STEER    RIGHT: SWING + BOOM    CURL / CLAMP / EXIT")
         return
     if not player.visible or player.health <= 0.0:
         hud.set_interaction_hint("")
@@ -195,9 +207,9 @@ func _update_interaction_prompt() -> void:
     var distance: float = player.global_position.distance_to(excavator.global_position)
     var climb_range: float = float(player.get("machine_climb_range")) if player.get("machine_climb_range") != null else 5.8
     if distance <= 3.5:
-        hud.set_interaction_hint("USE  //  HIJACK EXCAVATOR")
+        hud.set_interaction_hint("USE  //  HIJACK EXCAVATOR // ENTER OPERATOR POV")
     elif distance <= climb_range:
-        hud.set_interaction_hint("USE  //  LATCH + CLIMB EXCAVATOR")
+        hud.set_interaction_hint("USE  //  LATCH + CLIMB TO CAB")
     elif mission != null and int(mission.get("stage")) == 1:
         hud.set_interaction_hint("FOLLOW THE ORANGE MARKER // CLOSE ON THE EXCAVATOR")
     else:
