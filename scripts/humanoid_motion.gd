@@ -1,11 +1,62 @@
 extends "res://scripts/humanoid_rig.gd"
 
+const OrganicMesh = preload("res://scripts/organic_mesh.gd")
+
 var _motion_blend := 0.0
 var _gait_frequency := 1.0
 
 const THIGH_LEN := 0.56
 const SHIN_LEN := 0.56
 const STANCE_FRACTION := 0.62
+
+func _build() -> void:
+    super()
+    _add_organic_mass()
+
+func _add_organic_mass() -> void:
+    if pelvis == null or torso == null:
+        return
+
+    var cloth := Color(0.15, 0.18, 0.175) if player_style else Color(0.22, 0.255, 0.23)
+    var dark := Color(0.055, 0.065, 0.062)
+
+    var pelvis_shell := OrganicMesh.loft_node([
+        Vector3(-0.18, 0.22, 0.16),
+        Vector3(-0.06, 0.31, 0.22),
+        Vector3(0.12, 0.33, 0.23),
+        Vector3(0.24, 0.28, 0.20)
+    ], dark, 16, 0.86)
+    pelvis_shell.position = Vector3(0.0, 0.02, 0.0)
+    pelvis_shell.scale.x = 1.08 if player_style else 1.0
+    pelvis.add_child(pelvis_shell)
+
+    var torso_shell := OrganicMesh.loft_node([
+        Vector3(-0.10, 0.27, 0.20),
+        Vector3(0.06, 0.31, 0.22),
+        Vector3(0.30, 0.39, 0.245),
+        Vector3(0.56, 0.44, 0.255),
+        Vector3(0.72, 0.41, 0.24),
+        Vector3(0.82, 0.30, 0.20)
+    ], cloth, 18, 0.74)
+    torso_shell.position = Vector3(0.0, -0.01, 0.015)
+    torso_shell.scale.x = 1.07 if player_style else 1.0
+    torso.add_child(torso_shell)
+
+    _add_limb_shell(leg_l, Vector3(-0.51, 0.16, 0.14), Vector3(-0.06, 0.145, 0.125), cloth, 13)
+    _add_limb_shell(leg_r, Vector3(-0.51, 0.16, 0.14), Vector3(-0.06, 0.145, 0.125), cloth, 13)
+    _add_limb_shell(arm_l, Vector3(-0.49, 0.125, 0.112), Vector3(-0.03, 0.145, 0.13), cloth, 12)
+    _add_limb_shell(arm_r, Vector3(-0.49, 0.125, 0.112), Vector3(-0.03, 0.145, 0.13), cloth, 12)
+
+func _add_limb_shell(parent: Node3D, bottom: Vector3, top: Vector3, color: Color, segments: int) -> void:
+    if parent == null:
+        return
+    var shell := OrganicMesh.loft_node([
+        bottom,
+        Vector3(lerpf(bottom.x, top.x, 0.34), bottom.y * 1.03, bottom.z * 1.03),
+        Vector3(lerpf(bottom.x, top.x, 0.68), top.y * 1.04, top.z * 1.04),
+        top
+    ], color, segments, 0.78)
+    parent.add_child(shell)
 
 func animate(delta: float, planar_speed: float, reference_speed: float, attack_amount: float, hit_amount: float, dead: bool) -> void:
     if pelvis == null:
