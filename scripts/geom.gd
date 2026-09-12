@@ -24,6 +24,20 @@ static func emissive_material(
     mat.emission_energy_multiplier = emission_energy
     return mat
 
+static func glass_material(
+        tint: Color = Color(0.36, 0.63, 0.72, 0.20),
+        roughness: float = 0.12,
+        metallic: float = 0.08
+) -> StandardMaterial3D:
+    var mat := StandardMaterial3D.new()
+    mat.albedo_color = tint
+    mat.roughness = roughness
+    mat.metallic = metallic
+    mat.transparency = BaseMaterial3D.TRANSPARENCY_ALPHA
+    mat.shading_mode = BaseMaterial3D.SHADING_MODE_PER_PIXEL
+    mat.cull_mode = BaseMaterial3D.CULL_DISABLED
+    return mat
+
 static func box_mesh(
         size: Vector3,
         color: Color,
@@ -34,11 +48,7 @@ static func box_mesh(
     mesh.size = size
     var node := MeshInstance3D.new()
     node.mesh = mesh
-    node.material_override = material(
-        color,
-        roughness,
-        metallic
-    )
+    node.material_override = material(color, roughness, metallic)
     return node
 
 static func cylinder_mesh(
