@@ -60,7 +60,11 @@ func apply_impact(
         var local_weight := weights[i]
         var dent := (
             cell
-            * (0.035 + energy_ratio * 0.050)
+            * (
+                0.025
+                + energy_ratio * 0.046
+                + impulse_scale * 0.015
+            )
             * local_weight
         )
         _positions[i] += impulse_direction * dent
@@ -91,24 +95,31 @@ func apply_impact(
         var directional_shear := (
             1.0 - absf(axis.dot(impulse_direction))
         )
+        var damage_drive := (
+            energy_ratio * 0.27
+            + impulse_scale * 0.11
+        )
         var damage_increment := (
             weight
-            * energy_ratio
-            * (0.18 + directional_shear * 0.18)
+            * damage_drive
+            * (0.70 + directional_shear * 0.55)
         )
         bond.damage = clampf(
-            maxf(float(bond.damage), float(bond.damage) + damage_increment),
+            float(bond.damage) + damage_increment,
             0.0,
             1.0
         )
         var plastic_increment := (
             weight
-            * energy_ratio
-            * (0.004 + directional_shear * 0.008)
+            * (energy_ratio * 0.006 + impulse_scale * 0.003)
+            * (0.72 + directional_shear * 0.55)
         )
+        var direction_sign := signf(axis.dot(impulse_direction))
+        if absf(direction_sign) < 0.5:
+            direction_sign = 1.0
         bond.plastic = clampf(
             float(bond.plastic)
-            + signf(axis.dot(impulse_direction)) * plastic_increment,
+            + direction_sign * plastic_increment,
             -0.22,
             0.22
         )
@@ -140,9 +151,9 @@ func fracture_localized(
         2.10
     )
     var crack_width := cell * clampf(
-        0.10 + energy_ratio * 0.035,
-        0.10,
-        0.30
+        0.12 + energy_ratio * 0.045,
+        0.12,
+        0.36
     )
 
     var planar := Vector2(impact_direction.x, impact_direction.z)
@@ -156,52 +167,121 @@ func fracture_localized(
             + impact_energy * 0.00013
         )
 
-    var crack_count := clampi(2 + int(energy_ratio * 0.75), 2, 5)
-    var crack_length := maxf(span.x, span.z) * 1.35
+    var target_components := clampi(
+        2 + int(floor(sqrt(energy_ratio) * 1.55)),
+        2,
+        6
+    )
+    var crack_count := clampi(
+        target_components + (1 if energy_ratio > 2.8 else 0),
+        2,
+        7
+    )
+    var crack_length := maxf(span.x, span.z) * 1.45
     var ray_ends: Array[Vector3] = []
     for crack_index in crack_count:
         var phase := float(crack_index) / float(crack_count)
         var angle := (
             base_angle
             + phase * TAU
-            + sin(float(crack_index) * 2.37 + base_angle) * 0.28
+            + sin(float(crack_index) * 2.37 + base_angle) * 0.22
         )
         ray_ends.append(
             local_point
             + Vector3(cos(angle), 0.0, sin(angle)) * crack_length
         )
 
+    _cut_ray_family(
+        local_point,
+        ray_ends,
+        core_radius,
+        crack_width,
+        energy_ratio
+    )
+    _refresh_topology()
+
+    # A visible fracture must change connectivity, not only bond shading. If the
+    # first radial family still leaves alternate diagonal load paths, add
+    # deterministic contact-origin cuts until the energy-derived target is met.
+    var reinforcement_pass := 0
+    while _component_count < target_components and reinforcement_pass < 4:
+        var extra_angle := (
+            base_angle
+            + (float(reinforcement_pass) + 0.5)
+            * TAU / float(maxi(target_components, 2))
+            + 0.31
+        )
+        var extra_end := (
+            local_point
+            + Vector3(cos(extra_angle), 0.0, sin(extra_angle))
+            * crack_length
+        )
+        _cut_single_ray(
+            local_point,
+            extra_end,
+            crack_width * (1.10 + float(reinforcement_pass) * 0.08),
+            energy_ratio
+        )
+        _refresh_topology()
+        reinforcement_pass += 1
+
+    # High-energy local spall detaches a bounded patch around the strike point.
+    # This is intentionally local: it avoids the old whole-panel column breakup.
+    if _component_count < target_components and energy_ratio >= 1.10:
+        _cut_spall_ring(
+            local_point,
+            cell * clampf(0.72 + energy_ratio * 0.18, 0.82, 1.60),
+            crack_width
+        )
+        _refresh_topology()
+
+func _cut_ray_family(
+        origin: Vector3,
+        ray_ends: Array[Vector3],
+        core_radius: float,
+        crack_width: float,
+        energy_ratio: float
+) -> void:
     for bond_index in _bonds.size():
         var bond: Dictionary = _bonds[bond_index]
         if not bool(bond.active):
             continue
         var first := int(bond.a)
         var second := int(bond.b)
-        var midpoint := (
-            _rest_positions[first] + _rest_positions[second]
-        ) * 0.5
-        var radial_distance := midpoint.distance_to(local_point)
+        var first_position := _rest_positions[first]
+        var second_position := _rest_positions[second]
+        var midpoint := (first_position + second_position) * 0.5
+        var radial_distance := midpoint.distance_to(origin)
         var crack_proximity := INF
+        var crosses_crack := false
         for ray_end in ray_ends:
             crack_proximity = minf(
                 crack_proximity,
-                _distance_to_segment_xz(
-                    midpoint,
-                    local_point,
-                    ray_end
-                )
+                _distance_to_segment_xz(midpoint, origin, ray_end)
             )
+            if _segments_intersect_xz(
+                    first_position,
+                    second_position,
+                    origin,
+                    ray_end
+            ):
+                crosses_crack = true
+
         var core_weight := _wendland(
             radial_distance / maxf(core_radius, 0.001)
         )
-        var crack_weight := clampf(
+        var proximity_weight := clampf(
             1.0 - crack_proximity / maxf(crack_width, 0.001),
             0.0,
             1.0
         )
+        var crack_weight := maxf(
+            proximity_weight,
+            1.0 if crosses_crack else 0.0
+        )
         var break_score := (
-            core_weight * energy_ratio * 0.62
-            + crack_weight * energy_ratio * 0.54
+            core_weight * energy_ratio * 0.58
+            + crack_weight * (0.74 + energy_ratio * 0.18)
         )
         if break_score >= 0.78:
             bond.damage = 1.0
@@ -209,12 +289,79 @@ func fracture_localized(
             _topology_dirty = true
         elif break_score > 0.12:
             bond.damage = clampf(
-                float(bond.damage) + break_score * 0.36,
+                float(bond.damage) + break_score * 0.34,
                 0.0,
                 1.0
             )
 
-    _refresh_topology()
+func _cut_single_ray(
+        origin: Vector3,
+        ray_end: Vector3,
+        crack_width: float,
+        energy_ratio: float
+) -> void:
+    for bond_index in _bonds.size():
+        var bond: Dictionary = _bonds[bond_index]
+        if not bool(bond.active):
+            continue
+        var first := int(bond.a)
+        var second := int(bond.b)
+        var first_position := _rest_positions[first]
+        var second_position := _rest_positions[second]
+        var midpoint := (first_position + second_position) * 0.5
+        var crosses := _segments_intersect_xz(
+            first_position,
+            second_position,
+            origin,
+            ray_end
+        )
+        var proximity := _distance_to_segment_xz(
+            midpoint,
+            origin,
+            ray_end
+        )
+        var proximity_weight := clampf(
+            1.0 - proximity / maxf(crack_width, 0.001),
+            0.0,
+            1.0
+        )
+        if not crosses and proximity_weight < 0.72:
+            continue
+        var cut_strength := maxf(
+            proximity_weight,
+            1.0 if crosses else 0.0
+        ) * (0.78 + energy_ratio * 0.12)
+        if cut_strength >= 0.72:
+            bond.damage = 1.0
+            bond.active = false
+            _topology_dirty = true
+
+func _cut_spall_ring(
+        origin: Vector3,
+        ring_radius: float,
+        crack_width: float
+) -> void:
+    for bond_index in _bonds.size():
+        var bond: Dictionary = _bonds[bond_index]
+        if not bool(bond.active):
+            continue
+        var first := int(bond.a)
+        var second := int(bond.b)
+        var first_distance := _rest_positions[first].distance_to(origin)
+        var second_distance := _rest_positions[second].distance_to(origin)
+        var crosses_ring := (
+            (first_distance - ring_radius)
+            * (second_distance - ring_radius)
+            <= 0.0
+        )
+        var midpoint := (
+            _rest_positions[first] + _rest_positions[second]
+        ) * 0.5
+        var ring_error := absf(midpoint.distance_to(origin) - ring_radius)
+        if crosses_ring or ring_error <= crack_width * 0.62:
+            bond.damage = 1.0
+            bond.active = false
+            _topology_dirty = true
 
 func get_node_position(column: int, row: int) -> Vector3:
     if columns <= 0 or rows <= 0:
@@ -274,3 +421,23 @@ func _distance_to_segment_xz(
         return p.distance_to(a)
     var t := clampf((p - a).dot(ab) / denominator, 0.0, 1.0)
     return p.distance_to(a + ab * t)
+
+func _segments_intersect_xz(
+        first_a: Vector3,
+        first_b: Vector3,
+        second_a: Vector3,
+        second_b: Vector3
+) -> bool:
+    var a := Vector2(first_a.x, first_a.z)
+    var b := Vector2(first_b.x, first_b.z)
+    var c := Vector2(second_a.x, second_a.z)
+    var d := Vector2(second_b.x, second_b.z)
+    var ab := b - a
+    var cd := d - c
+    var denominator := ab.cross(cd)
+    if absf(denominator) <= 0.000001:
+        return false
+    var ac := c - a
+    var t := ac.cross(cd) / denominator
+    var u := ac.cross(ab) / denominator
+    return t >= 0.0 and t <= 1.0 and u >= 0.0 and u <= 1.0
