@@ -198,7 +198,7 @@ func damage_panel_at(
     )
     var impulse_magnitude := sqrt(maxf(2.0 * 310.0 * energy, 0.0))
     var network: PrecisionFractureNetwork = panel_networks[index]
-    var deformation := network.apply_impact(
+    var deformation: Dictionary = network.apply_impact(
         network_point,
         network_direction * impulse_magnitude,
         energy
@@ -265,7 +265,7 @@ func _update_panel_skin(index: int) -> void:
             var cell := cells[cell_index] as MeshInstance3D
             if cell == null or not is_instance_valid(cell):
                 continue
-            var state := network.get_cell_state(column, row)
+            var state: Dictionary = network.get_cell_state(column, row)
             if state.is_empty():
                 continue
             var center_net: Vector3 = state.get("center", Vector3.ZERO)
@@ -482,7 +482,7 @@ func get_load_path_state() -> Dictionary:
     var broken_fraction := 0.0
     var max_displacement := 0.0
     for network in panel_networks:
-        var state := network.get_deformation_state()
+        var state: Dictionary = network.get_deformation_state()
         max_damage = maxf(
             max_damage,
             float(state.get("damage", 0.0))
