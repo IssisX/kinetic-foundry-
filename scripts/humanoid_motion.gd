@@ -752,10 +752,14 @@ func _solve_leg(
     var upper_direction := (
         knee_position - hip_position
     ).normalized()
-    hip.global_basis = _bone_basis(
+    var upper_basis := _bone_basis(
         upper_direction,
         world_right,
         forward
+    )
+    hip.global_transform = Transform3D(
+        upper_basis,
+        hip_position
     )
 
     var cosine := clampf(
@@ -771,10 +775,14 @@ func _solve_leg(
     var lower_direction := (
         state.ankle - knee_position
     ).normalized()
-    knee.global_basis = _bone_basis(
+    var lower_basis := _bone_basis(
         lower_direction,
         world_right,
         forward
+    )
+    knee.global_transform = Transform3D(
+        lower_basis,
+        knee_position
     )
 
     var desired_foot_basis := _foot_basis(
@@ -782,7 +790,10 @@ func _solve_leg(
         state.side,
         state.foot_pitch
     )
-    foot.global_basis = desired_foot_basis
+    foot.global_transform = Transform3D(
+        desired_foot_basis,
+        state.ankle
+    )
     state.reach = raw_distance / LEG_LEN
 
 func _bone_basis(
