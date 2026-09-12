@@ -1,18 +1,21 @@
 class_name CameraRig
 extends Node3D
 
+const PhysicsAudioScene = preload("res://scripts/physics_audio.gd")
+
 const CAMERA_COLLISION_MASK := 1 | 2 | 8
 const EVENT_MAX_BLEND := 0.42
-const EVENT_MAX_DISTANCE := 38.0
+const EVENT_MAX_DISTANCE := 42.0
 
 var target: Node3D
 var yaw := 0.0
-var pitch := -0.16
-var distance := 6.25
-var height := 2.30
+var pitch := -0.11
+var distance := 8.60
+var height := 1.72
+var shoulder_offset := 0.78
 var look_sensitivity := 0.0038
-var collision_margin := 0.38
-var minimum_distance := 1.85
+var collision_margin := 0.42
+var minimum_distance := 2.40
 var collision_enabled := true
 
 var _camera: Camera3D
@@ -21,7 +24,7 @@ var _manual_position := Vector3.ZERO
 var _manual_look_at := Vector3.ZERO
 var _manual_fov := 68.0
 
-var _third_person_fov := 72.0
+var _third_person_fov := 74.0
 var _machine_view := false
 var _machine: Node3D
 var _machine_anchor: Node3D
@@ -36,7 +39,7 @@ var _event_remaining := 0.0
 var _event_duration := 0.0
 var _event_blend := 0.0
 var _manual_override := 0.0
-var _current_fov := 72.0
+var _current_fov := 74.0
 
 func _ready() -> void:
     add_to_group("physical_event_listener")
@@ -48,21 +51,24 @@ func _ready() -> void:
     add_child(_camera)
     _current_fov = _third_person_fov
 
+    var physics_audio := PhysicsAudioScene.new()
+    get_parent().add_child.call_deferred(physics_audio)
+
 func set_target(node: Node3D) -> void:
     target = node
     _ahead_offset = Vector3.ZERO
     _event_blend = 0.0
 
 func set_on_foot_profile(
-        camera_distance: float = 6.25,
-        camera_height: float = 2.30,
-        fov: float = 72.0
+        camera_distance: float = 8.60,
+        camera_height: float = 1.72,
+        fov: float = 74.0
 ) -> void:
     distance = camera_distance
     height = camera_height
     _third_person_fov = fov
-    minimum_distance = 1.85
-    pitch = clampf(pitch, -0.60, 0.16)
+    minimum_distance = 2.40
+    pitch = clampf(pitch, -0.52, 0.12)
     if not _machine_view and not _manual_capture:
         _camera.fov = _third_person_fov
         _current_fov = _third_person_fov
@@ -245,7 +251,7 @@ func apply_look(delta: Vector2) -> void:
         return
     yaw -= delta.x * look_sensitivity
     pitch -= delta.y * look_sensitivity
-    pitch = clampf(pitch, -0.60, 0.16)
+    pitch = clampf(pitch, -0.52, 0.12)
     if delta.length_squared() > 0.16:
         _manual_override = 0.55
         _event_remaining = minf(_event_remaining, 0.16)
@@ -270,16 +276,16 @@ func _process(delta: float) -> void:
 
     var planar_velocity := _target_planar_velocity()
     var speed := planar_velocity.length()
-    var commitment := smoothstep(1.15, 4.80, speed)
+    var commitment := smoothstep(0.95, 4.65, speed)
     var ahead_target := Vector3.ZERO
     if commitment > 0.0:
         ahead_target = (
             planar_velocity.normalized()
-            * lerpf(0.0, 2.15, commitment)
+            * lerpf(0.0, 3.15, commitment)
         )
     _ahead_offset = _ahead_offset.lerp(
         ahead_target,
-        1.0 - exp(-4.8 * delta)
+        1.0 - exp(-4.6 * delta)
     )
 
     var anchor := (
@@ -308,7 +314,7 @@ func _process(delta: float) -> void:
     )
 
     var look_anchor := anchor.lerp(_event_point, _event_blend)
-    var speed_pullback := lerpf(1.0, 1.055, commitment)
+    var speed_pullback := lerpf(1.0, 1.11, commitment)
     var framed_distance := (
         distance
         * speed_pullback
@@ -317,13 +323,19 @@ func _process(delta: float) -> void:
     var basis := Basis(Vector3.UP, yaw)
     var back := basis * Vector3(0.0, 0.0, framed_distance)
     var vertical := Vector3.UP * (-sin(pitch) * framed_distance)
-    var desired := anchor + back + vertical
+    var shoulder_strength := (
+        shoulder_offset
+        * (1.0 - _event_blend * 0.88)
+        * (1.0 - commitment * 0.14)
+    )
+    var shoulder := basis * Vector3(shoulder_strength, 0.0, 0.0)
+    var desired := anchor + back + vertical + shoulder
     if collision_enabled:
         desired = _resolve_camera_collision(anchor, desired)
     var response := (
-        16.0
-        if global_position.distance_to(desired) > 1.4
-        else 11.0
+        15.0
+        if global_position.distance_to(desired) > 1.8
+        else 10.0
     )
     global_position = global_position.lerp(
         desired,
@@ -336,13 +348,13 @@ func _process(delta: float) -> void:
         )
     var desired_fov := (
         _third_person_fov
-        + commitment * 3.2
-        + _event_scale * _event_blend * 15.0
+        + commitment * 2.2
+        + _event_scale * _event_blend * 13.0
     )
     _current_fov = lerpf(
         _current_fov,
         desired_fov,
-        1.0 - exp(-7.0 * delta)
+        1.0 - exp(-6.5 * delta)
     )
     _camera.fov = _current_fov
     _camera.look_at(look_anchor, Vector3.UP)
