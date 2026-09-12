@@ -3,12 +3,28 @@ extends Node3D
 
 const MIX_RATE := 24000
 const MAX_VOICES := 14
+const STREAM_BUFFER_SECONDS := 0.28
 
 var _voices: Array[AudioStreamPlayer3D] = []
 var _serial := 0
+var _machine: Node3D
+var _machine_player: AudioStreamPlayer3D
+var _machine_playback: AudioStreamGeneratorPlayback
+var _engine_phase := 0.0
+var _hydraulic_phase := 0.0
+var _track_phase := 0.0
+var _noise_state := 0.137
 
 func _ready() -> void:
     add_to_group("physical_event_listener")
+    add_to_group("physics_audio")
+    if OS.get_environment("KF_CAPTURE") != "1":
+        _build_machine_stream()
+
+func _process(_delta: float) -> void:
+    if OS.get_environment("KF_CAPTURE") == "1":
+        return
+    _update_machine_stream()
 
 func physical_event(event: Dictionary) -> void:
     if OS.get_environment("KF_CAPTURE") == "1":
@@ -64,6 +80,131 @@ func physical_event(event: Dictionary) -> void:
     _voices.append(player)
     player.finished.connect(_on_voice_finished.bind(player))
     player.play()
+
+func _build_machine_stream() -> void:
+    var generator := AudioStreamGenerator.new()
+    generator.mix_rate = MIX_RATE
+    generator.buffer_length = STREAM_BUFFER_SECONDS
+    _machine_player = AudioStreamPlayer3D.new()
+    _machine_player.stream = generator
+    _machine_player.volume_db = -48.0
+    _machine_player.unit_size = 7.0
+    _machine_player.max_distance = 80.0
+    _machine_player.attenuation_filter_cutoff_hz = 12500.0
+    _machine_player.attenuation_filter_db = -8.0
+    add_child(_machine_player)
+    _machine_player.top_level = true
+    _machine_player.play()
+    _machine_playback = (
+        _machine_player.get_stream_playback()
+        as AudioStreamGeneratorPlayback
+    )
+
+func _update_machine_stream() -> void:
+    if _machine_player == null or _machine_playback == null:
+        return
+    if _machine == null or not is_instance_valid(_machine):
+        _machine = get_tree().get_first_node_in_group("machine") as Node3D
+    if _machine == null or not is_instance_valid(_machine):
+        _machine_player.volume_db = -60.0
+        return
+
+    _machine_player.global_position = _machine.global_position + Vector3.UP * 1.2
+    var speed := 0.0
+    if _machine is CharacterBody3D:
+        var body := _machine as CharacterBody3D
+        speed = Vector3(body.velocity.x, 0.0, body.velocity.z).length()
+
+    var effort := 0.0
+    var reaction := 0.0
+    var stability := 0.0
+    if _machine.has_method("get_sustained_contact_state"):
+        var state: Dictionary = _machine.get_sustained_contact_state()
+        effort = clampf(float(state.get("effort", 0.0)), 0.0, 1.0)
+        reaction = clampf(float(state.get("reaction_ratio", 0.0)), 0.0, 1.0)
+        stability = clampf(float(state.get("stability_ratio", 0.0)), 0.0, 1.5)
+
+    var hydraulic_ratio := 1.0
+    if _machine.has_method("get_hydraulic_ratio"):
+        hydraulic_ratio = clampf(float(_machine.get_hydraulic_ratio()), 0.0, 1.0)
+
+    var audible := maxf(
+        0.12,
+        clampf(speed / 7.0, 0.0, 1.0) * 0.46
+        + effort * 0.48
+        + reaction * 0.36
+    )
+    if _machine.has_method("is_player_driven") and bool(_machine.is_player_driven()):
+        audible = maxf(audible, 0.34)
+    var target_db := lerpf(-34.0, -7.0, clampf(audible, 0.0, 1.0))
+    _machine_player.volume_db = lerpf(
+        _machine_player.volume_db,
+        target_db,
+        0.12
+    )
+
+    var available := mini(_machine_playback.get_frames_available(), 1536)
+    for _i in available:
+        var engine_hz := 43.0 + speed * 5.6 + effort * 8.0
+        var hydraulic_hz := (
+            118.0
+            + effort * 118.0
+            + reaction * 74.0
+            + (1.0 - hydraulic_ratio) * 32.0
+        )
+        var track_hz := 5.5 + speed * 3.2
+
+        _engine_phase = fmod(
+            _engine_phase + TAU * engine_hz / float(MIX_RATE),
+            TAU
+        )
+        _hydraulic_phase = fmod(
+            _hydraulic_phase + TAU * hydraulic_hz / float(MIX_RATE),
+            TAU
+        )
+        _track_phase = fmod(
+            _track_phase + TAU * track_hz / float(MIX_RATE),
+            TAU
+        )
+
+        _noise_state = fmod(_noise_state * 17.731 + 0.139, 1.0)
+        var noise := _noise_state * 2.0 - 1.0
+        var engine := (
+            sin(_engine_phase) * 0.48
+            + sin(_engine_phase * 2.0 + 0.2) * 0.17
+            + sin(_engine_phase * 3.0 + 0.7) * 0.07
+        )
+        var hydraulic := (
+            sin(_hydraulic_phase) * 0.26
+            + sin(_hydraulic_phase * 1.51 + 0.4) * 0.11
+        ) * effort * (0.34 + reaction * 0.66)
+        var track_gate := maxf(0.0, sin(_track_phase))
+        track_gate = track_gate * track_gate * track_gate
+        var tracks := (
+            track_gate
+            * noise
+            * clampf(speed / 6.0, 0.0, 1.0)
+            * 0.22
+        )
+        var strain_groan := (
+            sin(_engine_phase * 0.37 + _hydraulic_phase * 0.08)
+            * reaction
+            * effort
+            * 0.18
+        )
+        var instability := (
+            noise
+            * maxf(stability - 0.82, 0.0)
+            * 0.08
+        )
+        var sample := tanh(
+            engine * 0.42
+            + hydraulic
+            + tracks
+            + strain_groan
+            + instability
+        ) * 0.72
+        _machine_playback.push_frame(Vector2(sample, sample))
 
 func _duration_for(event_type: String, mass: float, fracture: float) -> float:
     if event_type == "collapse":
@@ -157,10 +298,20 @@ func _synthesize(
 
 func _base_frequency(material: String, mass: float, event_type: String) -> float:
     if event_type == "collapse":
-        return clampf(68.0 / pow(maxf(mass / 650.0, 0.25), 0.18), 34.0, 74.0)
+        return clampf(
+            68.0 / pow(maxf(mass / 650.0, 0.25), 0.18),
+            34.0,
+            74.0
+        )
     if material.contains("concrete"):
-        return clampf(132.0 / pow(maxf(mass / 120.0, 0.22), 0.22), 72.0, 178.0)
-    var steel_frequency := 285.0 / pow(maxf(mass / 80.0, 0.25), 0.24)
+        return clampf(
+            132.0 / pow(maxf(mass / 120.0, 0.22), 0.22),
+            72.0,
+            178.0
+        )
+    var steel_frequency := (
+        285.0 / pow(maxf(mass / 80.0, 0.25), 0.24)
+    )
     return clampf(steel_frequency, 82.0, 410.0)
 
 func _prune_voices() -> void:
