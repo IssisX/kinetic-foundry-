@@ -1,9 +1,7 @@
 extends Node3D
 
 const GeomUtil = preload("res://scripts/geom.gd")
-const BreakableGateScript = preload(
-    "res://scripts/breakable_gate_precision.gd"
-)
+const BreakableGateScript = preload("res://scripts/breakable_gate.gd")
 
 func _ready() -> void:
     name = "BreachLane"
