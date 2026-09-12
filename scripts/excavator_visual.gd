@@ -47,19 +47,10 @@ static func build(root: Node3D) -> Dictionary:
         grille.position = Vector3(1.305, 1.92, -0.30 + float(grille_i) * 0.23)
         root.add_child(grille)
 
-    var cab_frame := GeomUtil.box_mesh(Vector3(1.46, 1.90, 1.72), Color(0.085, 0.095, 0.09), 0.56, 0.28)
-    cab_frame.position = Vector3(-0.66, 2.48, 0.24)
-    root.add_child(cab_frame)
-
-    var windshield := GeomUtil.box_mesh(Vector3(1.08, 1.34, 0.055), Color(0.10, 0.20, 0.22), 0.22, 0.40)
-    windshield.position = Vector3(-0.66, 2.53, -0.65)
-    root.add_child(windshield)
-    var side_window := GeomUtil.box_mesh(Vector3(0.055, 1.28, 1.04), Color(0.10, 0.20, 0.22), 0.22, 0.40)
-    side_window.position = Vector3(-1.42, 2.54, 0.08)
-    root.add_child(side_window)
+    _build_cab(root, nodes)
 
     var work_light := OmniLight3D.new()
-    work_light.position = Vector3(-0.74, 3.47, -0.66)
+    work_light.position = Vector3(-0.74, 3.52, -0.72)
     work_light.light_color = Color(1.0, 0.72, 0.38)
     work_light.light_energy = 1.8
     work_light.omni_range = 7.5
@@ -68,7 +59,7 @@ static func build(root: Node3D) -> Dictionary:
 
     var beacon := GeomUtil.cylinder_mesh(0.12, 0.18, Color(0.98, 0.43, 0.05), 0.34, 0.05)
     beacon.material_override = GeomUtil.emissive_material(Color(0.98, 0.43, 0.05), 2.4, 0.34, 0.05)
-    beacon.position = Vector3(-0.70, 3.52, 0.88)
+    beacon.position = Vector3(-0.70, 3.62, 0.88)
     root.add_child(beacon)
 
     var boom := Node3D.new()
@@ -170,10 +161,81 @@ static func build(root: Node3D) -> Dictionary:
 
     return nodes
 
+static func _build_cab(root: Node3D, nodes: Dictionary) -> void:
+    var frame_color := Color(0.075, 0.085, 0.080)
+    var interior_color := Color(0.055, 0.062, 0.060)
+    var steel_color := Color(0.16, 0.17, 0.16)
+
+    var cab_floor := GeomUtil.box_mesh(Vector3(1.50, 0.16, 1.72), frame_color, 0.86, 0.28)
+    cab_floor.position = Vector3(-0.66, 1.62, 0.24)
+    root.add_child(cab_floor)
+    var cab_roof := GeomUtil.box_mesh(Vector3(1.52, 0.15, 1.76), frame_color, 0.76, 0.32)
+    cab_roof.position = Vector3(-0.66, 3.45, 0.24)
+    root.add_child(cab_roof)
+
+    for x in [-1.36, 0.04]:
+        for z in [-0.58, 1.02]:
+            var pillar := GeomUtil.box_mesh(Vector3(0.11, 1.78, 0.11), frame_color, 0.72, 0.38)
+            pillar.position = Vector3(x, 2.53, z)
+            root.add_child(pillar)
+
+    var back_panel := GeomUtil.box_mesh(Vector3(1.40, 1.15, 0.12), interior_color, 0.86, 0.20)
+    back_panel.position = Vector3(-0.66, 2.25, 1.00)
+    root.add_child(back_panel)
+
+    var windshield := GeomUtil.box_mesh(Vector3(1.27, 1.48, 0.035), Color.WHITE)
+    windshield.material_override = GeomUtil.glass_material(Color(0.32, 0.60, 0.68, 0.17), 0.10, 0.10)
+    windshield.position = Vector3(-0.66, 2.58, -0.595)
+    root.add_child(windshield)
+
+    for x in [-1.375, 0.055]:
+        var side_window := GeomUtil.box_mesh(Vector3(0.035, 1.44, 1.36), Color.WHITE)
+        side_window.material_override = GeomUtil.glass_material(Color(0.28, 0.56, 0.64, 0.15), 0.11, 0.08)
+        side_window.position = Vector3(x, 2.58, 0.22)
+        root.add_child(side_window)
+
+    var seat_base := GeomUtil.box_mesh(Vector3(0.58, 0.18, 0.58), interior_color, 0.95, 0.0)
+    seat_base.position = Vector3(-0.68, 1.92, 0.46)
+    root.add_child(seat_base)
+    var seat_back := GeomUtil.box_mesh(Vector3(0.58, 0.72, 0.16), interior_color, 0.94, 0.0)
+    seat_back.position = Vector3(-0.68, 2.24, 0.71)
+    seat_back.rotation.x = -0.12
+    root.add_child(seat_back)
+
+    var dashboard := GeomUtil.box_mesh(Vector3(1.18, 0.28, 0.34), steel_color, 0.78, 0.18)
+    dashboard.position = Vector3(-0.66, 2.04, -0.38)
+    dashboard.rotation.x = -0.12
+    root.add_child(dashboard)
+    for i in 4:
+        var gauge := GeomUtil.cylinder_mesh(0.075, 0.018, Color(0.08, 0.12, 0.10), 0.32, 0.12)
+        gauge.rotation.x = PI * 0.5
+        gauge.position = Vector3(-1.03 + float(i) * 0.25, 2.13, -0.545)
+        root.add_child(gauge)
+        var glow := GeomUtil.sphere_mesh(0.022, Color(0.20, 0.95, 0.45))
+        glow.material_override = GeomUtil.emissive_material(Color(0.20, 0.95, 0.45), 1.8, 0.2, 0.0)
+        glow.position = gauge.position + Vector3(0.0, 0.0, -0.025)
+        root.add_child(glow)
+
+    for side in [-1.0, 1.0]:
+        var console := GeomUtil.box_mesh(Vector3(0.22, 0.18, 0.58), interior_color, 0.88, 0.12)
+        console.position = Vector3(-0.66 + side * 0.48, 1.97, 0.20)
+        root.add_child(console)
+        var joystick := GeomUtil.capsule_mesh(0.045, 0.34, Color(0.12, 0.13, 0.12))
+        joystick.position = console.position + Vector3(0.0, 0.24, -0.06)
+        joystick.rotation.z = side * 0.08
+        root.add_child(joystick)
+
+    var operator_view := Node3D.new()
+    operator_view.name = "OperatorView"
+    operator_view.position = Vector3(-0.66, 2.72, -0.34)
+    operator_view.rotation_degrees = Vector3(-5.0, 0.0, 0.0)
+    root.add_child(operator_view)
+    nodes.operator_view = operator_view
+
 static func _make_arm_probe(parent: Node3D, size: Vector3, local_position: Vector3) -> CollisionShape3D:
     var area := Area3D.new()
     area.collision_layer = 0
-    area.collision_mask = 8
+    area.collision_mask = 1 | 8
     area.monitoring = false
     area.monitorable = false
     parent.add_child(area)
