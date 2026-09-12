@@ -39,6 +39,7 @@ var _manual_override := 0.0
 var _current_fov := 72.0
 
 func _ready() -> void:
+    add_to_group("physical_event_listener")
     _camera = Camera3D.new()
     _camera.current = true
     _camera.fov = _third_person_fov
@@ -52,7 +53,11 @@ func set_target(node: Node3D) -> void:
     _ahead_offset = Vector3.ZERO
     _event_blend = 0.0
 
-func set_on_foot_profile(camera_distance: float = 6.25, camera_height: float = 2.30, fov: float = 72.0) -> void:
+func set_on_foot_profile(
+        camera_distance: float = 6.25,
+        camera_height: float = 2.30,
+        fov: float = 72.0
+) -> void:
     distance = camera_distance
     height = camera_height
     _third_person_fov = fov
@@ -94,33 +99,108 @@ func exit_machine_view(next_target: Node3D) -> void:
     _ahead_offset = Vector3.ZERO
     _event_blend = 0.0
 
-func add_machine_impulse(amount: float, local_direction: Vector3 = Vector3(0.0, 0.0, 1.0)) -> void:
+func add_machine_impulse(
+        amount: float,
+        local_direction: Vector3 = Vector3(0.0, 0.0, 1.0)
+) -> void:
     if not _machine_view:
         return
-    _machine_camera_shake += local_direction.normalized() * clampf(amount, 0.0, 0.065)
+    _machine_camera_shake += (
+        local_direction.normalized()
+        * clampf(amount, 0.0, 0.065)
+    )
+
+func physical_event(event: Dictionary) -> void:
+    if _manual_capture:
+        return
+    var event_position_value: Variant = event.get(
+        "position",
+        target.global_position if target != null else Vector3.ZERO
+    )
+    var event_position := event_position_value as Vector3
+    var impulse := maxf(float(event.get("impulse", 0.0)), 0.0)
+    var event_mass := maxf(float(event.get("mass", 1.0)), 1.0)
+    var fracture := clampf(float(event.get("fracture", 0.0)), 0.0, 1.0)
+    var radius := maxf(float(event.get("radius", 0.0)), 0.0)
+    var novelty := clampf(float(event.get("novelty", 1.0)), 0.25, 1.0)
+    var event_type := str(event.get("type", "impact"))
+
+    var impulse_score := clampf(
+        log(1.0 + impulse * 0.020) / 4.2,
+        0.0,
+        1.0
+    )
+    var mass_score := clampf(
+        log(1.0 + event_mass) / 8.2,
+        0.0,
+        1.0
+    )
+    var radius_score := clampf(radius / 18.0, 0.0, 1.0)
+    var salience := clampf(
+        (
+            impulse_score * 0.48
+            + mass_score * 0.18
+            + fracture * 0.24
+            + radius_score * 0.18
+        ) * novelty,
+        0.0,
+        1.0
+    )
+
+    if event_type == "collapse":
+        compose_collapse(event_position, maxf(radius, 8.0))
+    elif salience >= 0.20:
+        compose_impact(event_position, salience)
 
 func compose_impact(world_position: Vector3, salience: float) -> void:
     if _manual_capture:
         return
     var amount := clampf(salience, 0.0, 1.0)
     if _machine_view:
-        var direction := _machine.global_basis.inverse() * (world_position - _camera.global_position).normalized()
-        add_machine_impulse(lerpf(0.008, 0.040, amount), direction)
+        var direction := (
+            _machine.global_basis.inverse()
+            * (world_position - _camera.global_position).normalized()
+        )
+        add_machine_impulse(
+            lerpf(0.008, 0.040, amount),
+            direction
+        )
         return
-    _queue_event(world_position, amount, amount * 0.18, lerpf(0.20, 0.44, amount))
+    _queue_event(
+        world_position,
+        amount,
+        amount * 0.18,
+        lerpf(0.20, 0.44, amount)
+    )
 
-func compose_collapse(world_position: Vector3, world_extent: float = 10.0) -> void:
+func compose_collapse(
+        world_position: Vector3,
+        world_extent: float = 10.0
+) -> void:
     if _manual_capture or _machine_view:
         return
     var scale := clampf(world_extent / 14.0, 0.35, 1.0)
-    _queue_event(world_position + Vector3.UP * world_extent * 0.10, 1.0, scale, 1.20)
+    _queue_event(
+        world_position + Vector3.UP * world_extent * 0.10,
+        1.0,
+        scale,
+        1.20
+    )
 
-func _queue_event(world_position: Vector3, salience: float, scale: float, duration: float) -> void:
+func _queue_event(
+        world_position: Vector3,
+        salience: float,
+        scale: float,
+        duration: float
+) -> void:
     if target == null or not is_instance_valid(target):
         return
     if target.global_position.distance_to(world_position) > EVENT_MAX_DISTANCE:
         return
-    if _event_remaining > 0.0 and salience < _event_salience * 0.82:
+    if (
+        _event_remaining > 0.0
+        and salience < _event_salience * 0.82
+    ):
         return
     _event_point = world_position
     _event_salience = clampf(salience, 0.0, 1.0)
@@ -131,7 +211,11 @@ func _queue_event(world_position: Vector3, salience: float, scale: float, durati
 func is_machine_view() -> bool:
     return _machine_view
 
-func set_capture_pose(position: Vector3, look_at: Vector3, fov: float = 68.0) -> void:
+func set_capture_pose(
+        position: Vector3,
+        look_at: Vector3,
+        fov: float = 68.0
+) -> void:
     _manual_capture = true
     _manual_position = position
     _manual_look_at = look_at
@@ -189,51 +273,112 @@ func _process(delta: float) -> void:
     var commitment := smoothstep(1.15, 4.80, speed)
     var ahead_target := Vector3.ZERO
     if commitment > 0.0:
-        ahead_target = planar_velocity.normalized() * lerpf(0.0, 2.15, commitment)
-    _ahead_offset = _ahead_offset.lerp(ahead_target, 1.0 - exp(-4.8 * delta))
+        ahead_target = (
+            planar_velocity.normalized()
+            * lerpf(0.0, 2.15, commitment)
+        )
+    _ahead_offset = _ahead_offset.lerp(
+        ahead_target,
+        1.0 - exp(-4.8 * delta)
+    )
 
-    var anchor := target.global_position + Vector3.UP * height + _ahead_offset
+    var anchor := (
+        target.global_position
+        + Vector3.UP * height
+        + _ahead_offset
+    )
     var event_target := 0.0
     if _event_remaining > 0.0 and _manual_override <= 0.0:
-        var event_phase := _event_remaining / maxf(_event_duration, 0.001)
-        var envelope := minf(1.0, (1.0 - event_phase) * 8.0) * minf(1.0, event_phase * 4.0)
-        event_target = _event_salience * EVENT_MAX_BLEND * envelope
-    _event_blend = lerpf(_event_blend, event_target, 1.0 - exp(-9.0 * delta))
+        var event_phase := (
+            _event_remaining / maxf(_event_duration, 0.001)
+        )
+        var envelope := (
+            minf(1.0, (1.0 - event_phase) * 8.0)
+            * minf(1.0, event_phase * 4.0)
+        )
+        event_target = (
+            _event_salience
+            * EVENT_MAX_BLEND
+            * envelope
+        )
+    _event_blend = lerpf(
+        _event_blend,
+        event_target,
+        1.0 - exp(-9.0 * delta)
+    )
 
     var look_anchor := anchor.lerp(_event_point, _event_blend)
-    var framed_distance := distance * (1.0 + _event_scale * _event_blend * 0.52)
+    var speed_pullback := lerpf(1.0, 1.055, commitment)
+    var framed_distance := (
+        distance
+        * speed_pullback
+        * (1.0 + _event_scale * _event_blend * 0.52)
+    )
     var basis := Basis(Vector3.UP, yaw)
     var back := basis * Vector3(0.0, 0.0, framed_distance)
     var vertical := Vector3.UP * (-sin(pitch) * framed_distance)
     var desired := anchor + back + vertical
     if collision_enabled:
         desired = _resolve_camera_collision(anchor, desired)
-    var response := 16.0 if global_position.distance_to(desired) > 1.4 else 11.0
-    global_position = global_position.lerp(desired, 1.0 - exp(-response * delta))
+    var response := (
+        16.0
+        if global_position.distance_to(desired) > 1.4
+        else 11.0
+    )
+    global_position = global_position.lerp(
+        desired,
+        1.0 - exp(-response * delta)
+    )
     if collision_enabled:
-        global_position = _resolve_camera_collision(anchor, global_position)
-    var desired_fov := _third_person_fov + _event_scale * _event_blend * 15.0
-    _current_fov = lerpf(_current_fov, desired_fov, 1.0 - exp(-7.0 * delta))
+        global_position = _resolve_camera_collision(
+            anchor,
+            global_position
+        )
+    var desired_fov := (
+        _third_person_fov
+        + commitment * 3.2
+        + _event_scale * _event_blend * 15.0
+    )
+    _current_fov = lerpf(
+        _current_fov,
+        desired_fov,
+        1.0 - exp(-7.0 * delta)
+    )
     _camera.fov = _current_fov
     _camera.look_at(look_anchor, Vector3.UP)
 
 func _update_machine_view(delta: float) -> void:
     if _machine == null or not is_instance_valid(_machine):
         return
-    if _machine_anchor == null or not is_instance_valid(_machine_anchor):
+    if (
+        _machine_anchor == null
+        or not is_instance_valid(_machine_anchor)
+    ):
         if _machine.has_method("get_operator_view_anchor"):
             _machine_anchor = _machine.get_operator_view_anchor()
     if _machine_anchor == null:
-        _camera.global_transform = _machine.global_transform.translated_local(Vector3(0.0, 2.7, -0.45))
+        _camera.global_transform = (
+            _machine.global_transform.translated_local(
+                Vector3(0.0, 2.7, -0.45)
+            )
+        )
     else:
         _camera.global_transform = _machine_anchor.global_transform
     _camera.fov = _machine_fov
     _current_fov = _machine_fov
     _camera.current = true
-    _machine_camera_shake = _machine_camera_shake.lerp(Vector3.ZERO, 1.0 - exp(-17.0 * delta))
-    _camera.global_position += _camera.global_basis * _machine_camera_shake
+    _machine_camera_shake = _machine_camera_shake.lerp(
+        Vector3.ZERO,
+        1.0 - exp(-17.0 * delta)
+    )
+    _camera.global_position += (
+        _camera.global_basis * _machine_camera_shake
+    )
 
-func _resolve_camera_collision(anchor: Vector3, desired: Vector3) -> Vector3:
+func _resolve_camera_collision(
+        anchor: Vector3,
+        desired: Vector3
+) -> Vector3:
     var ray := desired - anchor
     var ray_len := ray.length()
     if ray_len <= minimum_distance:
@@ -248,22 +393,27 @@ func _resolve_camera_collision(anchor: Vector3, desired: Vector3) -> Vector3:
     query.collide_with_areas = false
     if target is CollisionObject3D:
         query.exclude = [target.get_rid()]
-    var fractions := get_world_3d().direct_space_state.cast_motion(query)
+    var fractions := get_world_3d().direct_space_state.cast_motion(
+        query
+    )
     if fractions.is_empty() or fractions[0] >= 0.999:
         return desired
     var dir := ray.normalized()
-    var safe_len := maxf(minimum_distance, ray_len * fractions[0] - collision_margin)
+    var safe_len := maxf(
+        minimum_distance,
+        ray_len * fractions[0] - collision_margin
+    )
     return anchor + dir * safe_len
 
 func _target_planar_velocity() -> Vector3:
     if target is CharacterBody3D:
-        var velocity: Vector3 = target.velocity
-        velocity.y = 0.0
-        return velocity
+        var body_velocity: Vector3 = target.velocity
+        body_velocity.y = 0.0
+        return body_velocity
     if target is RigidBody3D:
-        var velocity: Vector3 = target.linear_velocity
-        velocity.y = 0.0
-        return velocity
+        var rigid_velocity: Vector3 = target.linear_velocity
+        rigid_velocity.y = 0.0
+        return rigid_velocity
     return Vector3.ZERO
 
 func flat_forward() -> Vector3:
