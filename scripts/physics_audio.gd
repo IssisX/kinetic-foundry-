@@ -52,7 +52,9 @@ func physical_event(event: Dictionary) -> void:
     if _voices.size() >= MAX_VOICES:
         if importance < 0.42:
             return
-        var oldest := _voices.pop_front()
+        var oldest: AudioStreamPlayer3D = (
+            _voices.pop_front() as AudioStreamPlayer3D
+        )
         if is_instance_valid(oldest):
             oldest.stop()
             oldest.queue_free()
