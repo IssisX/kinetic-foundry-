@@ -703,6 +703,8 @@ func _solve_leg(
         foot: Node3D,
         state: FootState
 ) -> void:
+    if not foot.top_level:
+        foot.top_level = true
     var hip_position := hip.global_position
     var to_target := state.ankle - hip_position
     var raw_distance := to_target.length()
@@ -870,6 +872,7 @@ func _animate_run(
         speed: float,
         reference_speed: float
 ) -> void:
+    _restore_run_feet()
     var speed_n := clampf(
         speed / maxf(reference_speed, 0.1),
         0.0,
@@ -894,8 +897,8 @@ func _animate_run(
     knee_r.rotation.x = -(
         0.20 + maxf(0.0, wave) * 1.02
     )
-    foot_l.rotation.x = 0.10
-    foot_r.rotation.x = 0.10
+    foot_l.rotation = Vector3(0.10, 0.0, 0.0)
+    foot_r.rotation = Vector3(0.10, 0.0, 0.0)
     pelvis.position = Vector3(
         0.0,
         BASE_PELVIS_HEIGHT + flight * 0.055,
@@ -930,6 +933,14 @@ func _animate_run(
     _support_world = (
         _com_world - Vector3.UP * BASE_PELVIS_HEIGHT
     )
+
+func _restore_run_feet() -> void:
+    if foot_l.top_level:
+        foot_l.top_level = false
+    if foot_r.top_level:
+        foot_r.top_level = false
+    foot_l.position = Vector3(0.0, -SHIN_LEN, 0.0)
+    foot_r.position = Vector3(0.0, -SHIN_LEN, 0.0)
 
 func _update_diagnostics(delta: float) -> void:
     if not _initialized or _mode == MODE_RUN:
