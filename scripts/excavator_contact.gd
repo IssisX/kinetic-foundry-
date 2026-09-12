@@ -6,10 +6,17 @@ var _hydraulic_fx_budget := 0.0
 var _previous_hydraulic_health := 260.0
 
 func get_operator_view_anchor() -> Node3D:
-    return get_node_or_null("OperatorView") as Node3D
+    var anchor := get_node_or_null("OperatorView") as Node3D
+    if anchor != null:
+        # Seat the camera inside the cab instead of against the windshield.
+        # This keeps the dashboard, pillars and glass readable as operator-space
+        # reference geometry and removes the hood-dominant pseudo-first-person look.
+        anchor.position = Vector3(-0.66, 2.78, 0.12)
+        anchor.rotation_degrees = Vector3(-1.0, 0.0, 0.0)
+    return anchor
 
 func get_operator_fov() -> float:
-    return 78.0
+    return 72.0
 
 func get_control_profile() -> Dictionary:
     return {
