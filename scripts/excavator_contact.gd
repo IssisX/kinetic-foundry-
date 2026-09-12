@@ -4,13 +4,13 @@ const MaterialFx = preload("res://scripts/material_fx.gd")
 
 var _hydraulic_fx_budget := 0.0
 var _previous_hydraulic_health := 260.0
+var _actuator_effort := 0.0
+var _contact_age := 0.0
+var _contact_targets: Array[Node] = []
 
 func get_operator_view_anchor() -> Node3D:
     var anchor := get_node_or_null("OperatorView") as Node3D
     if anchor != null:
-        # Seat the camera inside the cab instead of against the windshield.
-        # This keeps the dashboard, pillars and glass readable as operator-space
-        # reference geometry and removes the hood-dominant pseudo-first-person look.
         anchor.position = Vector3(-0.66, 2.78, 0.12)
         anchor.rotation_degrees = Vector3(-1.0, 0.0, 0.0)
     return anchor
@@ -33,6 +33,104 @@ func get_control_profile() -> Dictionary:
 func _physics_process(delta: float) -> void:
     _hydraulic_fx_budget = maxf(0.0, _hydraulic_fx_budget - delta)
     super(delta)
+    if _contact_targets.is_empty():
+        _contact_age = move_toward(_contact_age, 0.0, delta * 5.0)
+    else:
+        _contact_age = minf(_contact_age + delta, 2.0)
+
+func get_tool_force() -> float:
+    var base_force := super()
+    var hydraulic_ratio := maxf(get_hydraulic_ratio(), 0.18)
+    var commanded_pressure := _actuator_effort * lerpf(
+        42.0,
+        118.0,
+        hydraulic_ratio
+    )
+    var braced_gain := 1.0 + _load_path_resistance * 0.34
+    return minf((base_force + commanded_pressure) * braced_gain, 245.0)
+
+func set_load_path_feedback(state: Dictionary) -> void:
+    if not state.has("reaction_ratio"):
+        super(state)
+        return
+    var target := clampf(float(state.get("reaction_ratio", 0.0)), 0.0, 1.0)
+    _load_path_resistance = move_toward(
+        _load_path_resistance,
+        target,
+        0.30
+    )
+
+func get_sustained_contact_state() -> Dictionary:
+    var valid_contacts: Array[Node] = []
+    for collider in _contact_targets:
+        if is_instance_valid(collider):
+            valid_contacts.append(collider)
+    var direction := -_tool.global_basis.z
+    if _tool_tip_velocity.length_squared() > 0.04:
+        direction = _tool_tip_velocity.normalized()
+    var held_mass := 0.0
+    if is_holding_load():
+        held_mass = float(held_load.get("mass"))
+    return {
+        "active": not valid_contacts.is_empty(),
+        "contacts": valid_contacts,
+        "position": _tool.global_position,
+        "direction": direction,
+        "force": get_tool_force(),
+        "effort": _actuator_effort,
+        "persistence": _contact_age,
+        "reaction_ratio": _load_path_resistance,
+        "held_mass": held_mass
+    }
+
+func _player_control(delta: float) -> void:
+    if hud == null or camera_rig == null:
+        return
+    var track_ratio := maxf(get_track_ratio(), 0.18)
+    var hydraulic_ratio := maxf(get_hydraulic_ratio(), 0.22)
+    hydraulic_ratio *= 1.0 - _load_path_resistance * 0.42
+    var axis: Vector2 = hud.move_axis
+    var throttle: float = -axis.y
+    var steering: float = axis.x
+    var forward: Vector3 = -global_basis.z
+    var chassis_brace := 1.0 - _load_path_resistance * _actuator_effort * 0.34
+    velocity.x = forward.x * throttle * drive_speed * track_ratio * chassis_brace
+    velocity.z = forward.z * throttle * drive_speed * track_ratio * chassis_brace
+    rotation.y -= steering * turn_speed * track_ratio * delta
+
+    var look: Vector2 = hud.consume_look()
+    var look_effort := clampf(look.length() / 32.0, 0.0, 1.0)
+    var desired_effort := maxf(look_effort, 1.0 if hud.smash_held else 0.0)
+    _actuator_effort = move_toward(
+        _actuator_effort,
+        desired_effort,
+        delta * (7.0 if desired_effort > _actuator_effort else 3.2)
+    )
+
+    arm_yaw -= look.x * 0.0032 * hydraulic_ratio
+    boom_angle += look.y * 0.0026 * hydraulic_ratio
+    arm_yaw = clampf(arm_yaw, -1.25, 1.25)
+    boom_angle = clampf(boom_angle, -0.95, 0.42)
+
+    if hud.smash_held:
+        stick_angle -= 1.05 * hydraulic_ratio * delta
+        tool_angle -= 1.30 * hydraulic_ratio * delta
+    if hud.consume_attack():
+        _actuator_effort = 1.0
+        stick_angle -= 0.12 * hydraulic_ratio
+        tool_angle -= 0.12 * hydraulic_ratio
+        _impact_cooldown = 0.0
+    if hud.consume_grab():
+        if is_holding_load():
+            _release_load(true)
+        elif not _try_grip_load():
+            stick_angle += 0.24 * hydraulic_ratio
+            tool_angle += 0.28 * hydraulic_ratio
+    if hud.consume_use() or Input.is_physical_key_pressed(KEY_E):
+        exit_player()
+
+    stick_angle = clampf(stick_angle, -0.55, 1.00)
+    tool_angle = clampf(tool_angle, -1.0, 0.72)
 
 func _apply_machine_damage(amount: float, direction: Vector3) -> void:
     var hydraulic_before := hydraulic_health
@@ -89,7 +187,47 @@ func _collect_hard_arm_contacts() -> Array[Node]:
     return contacts
 
 func _resolve_arm_contact_pose() -> void:
-    super()
+    var target_boom := boom_angle
+    var target_stick := stick_angle
+    var target_tool := tool_angle
+    var target_yaw := arm_yaw
+    _apply_arm_pose()
+    var contacts := _collect_hard_arm_contacts()
+    _contact_targets.clear()
+    for collider in contacts:
+        if is_instance_valid(collider):
+            _contact_targets.append(collider)
+    if contacts.is_empty():
+        _store_safe_arm_pose()
+        _push_dynamic_arm_contacts()
+        return
+
+    _react_to_arm_contacts(contacts)
+    var low := 0.0
+    var high := 1.0
+    var best := 0.0
+    for _i in 6:
+        var mid := (low + high) * 0.5
+        _set_interpolated_arm_pose(
+            target_boom,
+            target_stick,
+            target_tool,
+            target_yaw,
+            mid
+        )
+        if _collect_hard_arm_contacts().is_empty():
+            best = mid
+            low = mid
+        else:
+            high = mid
+    _set_interpolated_arm_pose(
+        target_boom,
+        target_stick,
+        target_tool,
+        target_yaw,
+        best
+    )
+    _store_safe_arm_pose()
     _push_dynamic_arm_contacts()
 
 func _push_dynamic_arm_contacts() -> void:
@@ -131,10 +269,22 @@ func _push_dynamic_arm_contacts() -> void:
             if body.has_method("machine_hit"):
                 body.machine_hit(force * 0.42, direction)
             else:
-                var impulse_mag: float = minf((8.0 + speed * 7.5) * body.mass, 2400.0)
-                var contact_offset: Vector3 = body.to_local(collision.global_position)
-                body.apply_impulse(direction * impulse_mag + Vector3.UP * body.mass * 0.55, contact_offset)
-                body.apply_torque_impulse(Vector3(direction.z, 0.18, -direction.x) * body.mass * minf(speed, 8.0) * 0.28)
+                var impulse_mag: float = minf(
+                    (8.0 + speed * 7.5) * body.mass,
+                    2400.0
+                )
+                var contact_offset: Vector3 = body.to_local(
+                    collision.global_position
+                )
+                body.apply_impulse(
+                    direction * impulse_mag
+                    + Vector3.UP * body.mass * 0.55,
+                    contact_offset
+                )
+                body.apply_torque_impulse(
+                    Vector3(direction.z, 0.18, -direction.x)
+                    * body.mass * minf(speed, 8.0) * 0.28
+                )
 
     if not affected.is_empty():
         MaterialFx.steel(
@@ -143,6 +293,17 @@ func _push_dynamic_arm_contacts() -> void:
             direction,
             clampf(force / 42.0, 0.7, 3.6)
         )
-        if player_driver != null and camera_rig != null and camera_rig.has_method("add_machine_impulse"):
-            var local_bump := Vector3(direction.x, minf(speed * 0.035, 0.7), direction.z)
-            camera_rig.add_machine_impulse(clampf(0.010 + speed * 0.0018, 0.012, 0.050), local_bump)
+        if (
+            player_driver != null
+            and camera_rig != null
+            and camera_rig.has_method("add_machine_impulse")
+        ):
+            var local_bump := Vector3(
+                direction.x,
+                minf(speed * 0.035, 0.7),
+                direction.z
+            )
+            camera_rig.add_machine_impulse(
+                clampf(0.010 + speed * 0.0018, 0.012, 0.050),
+                local_bump
+            )
