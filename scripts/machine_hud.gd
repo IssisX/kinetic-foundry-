@@ -14,6 +14,13 @@ func clear_machine_profile() -> void:
 
 func set_machine_mode(enabled: bool) -> void:
     super(enabled)
+    # Machine operation owns the upper-left identity panel. Hiding the inherited
+    # title/mode labels prevents two independent identity systems from drawing
+    # through each other on Fold-class aspect ratios.
+    if _title_label != null:
+        _title_label.visible = not enabled
+    if _mode_label != null:
+        _mode_label.visible = not enabled
     if enabled:
         _apply_machine_profile()
     else:
@@ -42,20 +49,20 @@ func _draw_status_panel() -> void:
         super()
         return
     var s := _ui_scale
-    var panel := Rect2(Vector2(24.0, 18.0) * s, Vector2(420.0, 102.0) * s)
-    _rounded(panel, Color(0.010, 0.016, 0.016, 0.89), Color(0.78, 0.50, 0.11, 0.88), 2.0 * s)
+    var panel := Rect2(Vector2(24.0, 18.0) * s, Vector2(420.0, 112.0) * s)
+    _rounded(panel, Color(0.010, 0.016, 0.016, 0.91), Color(0.78, 0.50, 0.11, 0.90), 2.0 * s)
     draw_string(
         ThemeDB.fallback_font,
-        Vector2(44.0, 53.0) * s,
+        Vector2(44.0, 54.0) * s,
         str(_machine_profile.get("machine_name", "MACHINE")) + " // OPERATOR",
         HORIZONTAL_ALIGNMENT_LEFT,
-        330.0 * s,
+        344.0 * s,
         maxi(16, int(22.0 * s)),
         Color(1.0, 0.76, 0.28, 1.0)
     )
     draw_string(
         ThemeDB.fallback_font,
-        Vector2(44.0, 84.0) * s,
+        Vector2(44.0, 86.0) * s,
         str(_machine_profile.get("center_hint", "PHYSICAL CONTROL")),
         HORIZONTAL_ALIGNMENT_LEFT,
         350.0 * s,
