@@ -71,7 +71,7 @@ func _contact_reaction(contact_state: Dictionary) -> float:
         1.0
     )
     var reaction := 0.0
-    var contacts_value = contact_state.get("contacts", [])
+    var contacts_value: Variant = contact_state.get("contacts", [])
     var contacts: Array = contacts_value as Array
 
     for collider_value in contacts:
@@ -80,10 +80,11 @@ func _contact_reaction(contact_state: Dictionary) -> float:
             continue
         var owner := _load_path_owner(collider)
         if owner != null and owner.has_method("get_load_path_state"):
+            var owner_state: Dictionary = owner.call("get_load_path_state") as Dictionary
             reaction = maxf(
                 reaction,
                 _owner_reaction(
-                    owner.get_load_path_state(),
+                    owner_state,
                     force_ratio,
                     effort,
                     persistence
