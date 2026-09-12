@@ -43,7 +43,10 @@ func _run() -> void:
     await _settle_frames(8)
     _capture("06_breached_route.png")
 
-    await _stage_gait_observables()
+    var gait_ok: bool = await _stage_gait_observables()
+    if not gait_ok:
+        get_tree().quit(4)
+        return
 
     print("CAPTURE_SUITE_OK dir=", capture_dir)
     get_tree().quit(0)
@@ -187,7 +190,7 @@ func _stage_breach_gate() -> void:
     game.hud.set_context("ACCESS OPEN // DEBRIS REMAINS IN WORLD")
     _camera(gate.global_position + Vector3(11.0, 7.0, -12.0), gate.global_position + Vector3(0.0, 1.6, 0.0), 52.0)
 
-func _stage_gait_observables() -> void:
+func _stage_gait_observables() -> bool:
     _show_all_enemies(false)
     game.excavator.visible = false
     game.player.visible = true
@@ -199,8 +202,7 @@ func _stage_gait_observables() -> void:
     var rig = game.player._rig
     if rig == null:
         push_error("CAPTURE_GAIT_RIG_MISSING")
-        get_tree().quit(3)
-        return
+        return false
     rig.reset_gait_state()
     rig.set_gait_debug_enabled(true)
 
@@ -275,8 +277,9 @@ func _stage_gait_observables() -> void:
         rig.get_gait_acceptance_window()
     )
     print("GAIT_ACCEPTANCE ", JSON.stringify(acceptance))
-    _assert_gait_acceptance(acceptance)
+    var accepted := _gait_acceptance_passes(acceptance)
     rig.set_gait_debug_enabled(false)
+    return accepted
 
 func _advance_gait_frame(rig, velocity: Vector3) -> void:
     const STEP := 1.0 / 60.0
@@ -292,7 +295,7 @@ func _advance_gait_frame(rig, velocity: Vector3) -> void:
     )
     await get_tree().physics_frame
 
-func _assert_gait_acceptance(data: Dictionary) -> void:
+func _gait_acceptance_passes(data: Dictionary) -> bool:
     var valid: bool = (
         data.duration >= 3.99
         and data.left_stance_fraction > 0.52
@@ -309,7 +312,7 @@ func _assert_gait_acceptance(data: Dictionary) -> void:
             "GAIT_ACCEPTANCE_FAILED %s"
             % JSON.stringify(data)
         )
-        get_tree().quit(4)
+    return valid
 
 func _set_machine_hud() -> void:
     if game.hud.has_method("set_machine_profile") and game.excavator.has_method("get_control_profile"):

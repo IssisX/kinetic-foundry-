@@ -743,29 +743,20 @@ func _solve_leg(
         + perpendicular * bend
     )
 
-    var upper_direction := (
-        knee_position - hip_position
-    ).normalized()
     var root := _body()
     var world_right := (
         root.global_basis.x.normalized()
         if root != null
         else Vector3.RIGHT
     )
-    var y_axis := -upper_direction
-    var x_axis := (
-        world_right
-        - y_axis * world_right.dot(y_axis)
+    var upper_direction := (
+        knee_position - hip_position
+    ).normalized()
+    hip.global_basis = _bone_basis(
+        upper_direction,
+        world_right,
+        forward
     )
-    if x_axis.length_squared() < 0.001:
-        x_axis = forward.cross(y_axis)
-    x_axis = x_axis.normalized()
-    var z_axis := x_axis.cross(y_axis).normalized()
-    var world_basis := Basis(x_axis, y_axis, z_axis)
-    hip.basis = (
-        hip.get_parent().global_basis.inverse()
-        * world_basis
-    ).orthonormalized()
 
     var cosine := clampf(
         (
@@ -777,10 +768,13 @@ func _solve_leg(
         1.0
     )
     state.knee_flex = PI - acos(cosine)
-    knee.rotation = Vector3(
-        state.knee_flex,
-        0.0,
-        0.0
+    var lower_direction := (
+        state.ankle - knee_position
+    ).normalized()
+    knee.global_basis = _bone_basis(
+        lower_direction,
+        world_right,
+        forward
     )
 
     var desired_foot_basis := _foot_basis(
@@ -788,11 +782,24 @@ func _solve_leg(
         state.side,
         state.foot_pitch
     )
-    foot.basis = (
-        foot.get_parent().global_basis.inverse()
-        * desired_foot_basis
-    ).orthonormalized()
+    foot.global_basis = desired_foot_basis
     state.reach = raw_distance / LEG_LEN
+
+func _bone_basis(
+        down: Vector3,
+        right_hint: Vector3,
+        forward_hint: Vector3
+) -> Basis:
+    var y_axis := -down.normalized()
+    var x_axis := (
+        right_hint
+        - y_axis * right_hint.dot(y_axis)
+    )
+    if x_axis.length_squared() < 0.001:
+        x_axis = forward_hint.cross(y_axis)
+    x_axis = x_axis.normalized()
+    var z_axis := x_axis.cross(y_axis).normalized()
+    return Basis(x_axis, y_axis, z_axis).orthonormalized()
 
 func _pose_upper_body(speed: float) -> void:
     var speed_scale := clampf(
