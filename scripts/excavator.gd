@@ -54,6 +54,7 @@ var _tool_tip_speed := 0.0
 var _tool_motion_ready := false
 var _grip_force := Vector3.ZERO
 var _grip_stress := 0.0
+var _load_path_resistance := 0.0
 
 var _safe_boom_angle := -0.24
 var _safe_stick_angle := 0.42
@@ -123,6 +124,24 @@ func get_tool_force() -> float:
 
 func get_grip_stress() -> float:
     return _grip_stress
+
+func set_load_path_feedback(state: Dictionary) -> void:
+    var overload := clampf(
+        float(state.get("overload_ratio", 0.0)) / 1.6,
+        0.0,
+        1.0
+    )
+    var deformation: Dictionary = state.get("deformation", {})
+    var bend := clampf(
+        float(deformation.get("max_displacement", 0.0)) / 1.2,
+        0.0,
+        1.0
+    )
+    _load_path_resistance = clampf(
+        overload * 0.68 + bend * 0.42,
+        0.0,
+        1.0
+    )
 
 func is_holding_load() -> bool:
     return held_load != null and is_instance_valid(held_load)
@@ -264,6 +283,7 @@ func _player_control(delta: float) -> void:
         return
     var track_ratio := maxf(get_track_ratio(), 0.18)
     var hydraulic_ratio := maxf(get_hydraulic_ratio(), 0.22)
+    hydraulic_ratio *= 1.0 - _load_path_resistance * 0.18
     var axis: Vector2 = hud.move_axis
     var throttle: float = -axis.y
     var steering: float = axis.x
@@ -566,7 +586,7 @@ func _update_telemetry() -> void:
         get_track_ratio(),
         maxf(
             clampf(get_tool_force() / 130.0, 0.0, 1.0),
-            _grip_stress
+            maxf(_grip_stress, _load_path_resistance * 0.55)
         ),
         is_holding_load()
     )

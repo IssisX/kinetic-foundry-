@@ -6,9 +6,14 @@ const GatePanelScript = preload("res://scripts/gate_panel.gd")
 const StructuralDebris = preload(
     "res://scripts/structural_debris.gd"
 )
+const FractureNetwork = preload(
+    "res://scripts/fracture_network.gd"
+)
 
 var panel_health := [120.0, 120.0]
 var panels: Array[StaticBody3D] = []
+var panel_networks: Array[FractureNetwork] = []
+var _panel_base_positions: Array[Vector3] = []
 var breached := false
 var wedge_mass := 0.0
 var pry_energy := 0.0
@@ -30,6 +35,7 @@ func _build_gate() -> void:
         panel.set("gate_owner", self)
         add_child(panel)
         panels.append(panel)
+        _panel_base_positions.append(panel.position)
         var frame := GeomUtil.box_mesh(Vector3(4.0, 4.0, 0.24), Color(0.17, 0.18, 0.165), 0.88, 0.26)
         panel.add_child(frame)
         GeomUtil.add_box_collision(panel, Vector3(4.0, 4.0, 0.24))
@@ -42,6 +48,16 @@ func _build_gate() -> void:
             warning.position = Vector3(-1.25 + float(stripe) * 0.62, -1.45, -0.19)
             warning.rotation.z = 0.55
             panel.add_child(warning)
+        var network := FractureNetwork.new()
+        network.configure_grid(
+            5,
+            5,
+            Vector3(4.0, 0.0, 4.0),
+            310.0,
+            205.0,
+            true
+        )
+        panel_networks.append(network)
 
     for side in [-1.0, 1.0]:
         var post := GeomUtil.static_box(self, "GatePost", Vector3(side * 4.45, 2.5, 0.0), Vector3(0.48, 5.0, 0.72), Color(0.25, 0.25, 0.22))
@@ -74,6 +90,35 @@ func damage_panel(index: int, amount: float, direction: Vector3) -> void:
     var panel := panels[index]
     panel.rotation.y += direction.x * amount * 0.0018
     panel.rotation.x -= direction.y * amount * 0.0009
+    if index < panel_networks.size():
+        var network: FractureNetwork = panel_networks[index]
+        var local_direction := panel.global_basis.inverse() * direction
+        network.apply_force(
+            Vector3(0.0, 0.0, 0.0),
+            Vector3(
+                local_direction.x,
+                local_direction.z,
+                local_direction.y
+            ) * amount * 48.0
+        )
+        network.step(1.0 / 60.0)
+        var deformation := network.get_deformation_state()
+        panel.rotation.y += clampf(
+            float(deformation.roll) * 0.22,
+            -0.12,
+            0.12
+        )
+        panel.rotation.z += clampf(
+            float(deformation.pitch) * 0.18,
+            -0.10,
+            0.10
+        )
+        var base_position := _panel_base_positions[index]
+        panel.position = base_position + Vector3(
+            0.0,
+            0.0,
+            clampf(float(deformation.average.y) * 0.18, -0.08, 0.08)
+        )
     MaterialFx.steel(get_parent(), panel.global_position + Vector3.UP * 0.6, direction, clampf(amount / 18.0, 0.8, 5.0))
     if panel_health[index] <= 0.0:
         _break_panel(index, direction)
@@ -85,19 +130,46 @@ func _break_panel(index: int, direction: Vector3) -> void:
         return
     var transform := old.global_transform
     var break_pos := old.global_position
+    var network: FractureNetwork = panel_networks[index]
+    network.fracture_into_columns()
+    network.step(0.024)
+    var specs := network.get_fragment_specs(0.24, 1)
     old.queue_free()
-    var debris = StructuralDebris.new()
-    get_parent().add_child(debris)
-    debris.global_transform = transform
-    debris.configure(
-        Vector3(4.0, 4.0, 0.24),
-        Color(0.13, 0.14, 0.13),
-        310.0,
-        340.0,
-        "gate_panel"
-    )
-    debris.apply_central_impulse(direction.normalized() * 1850.0 + Vector3.UP * 420.0)
-    debris.apply_torque_impulse(Vector3(direction.z, 0.7, -direction.x) * 1250.0)
+    for i in specs.size():
+        var spec: Dictionary = specs[i]
+        var debris := StructuralDebris.new()
+        get_parent().add_child(debris)
+        var local := spec.local_position as Vector3
+        debris.global_position = transform * Vector3(
+            local.x,
+            local.z,
+            0.0
+        )
+        debris.global_basis = transform.basis
+        debris.configure(
+            Vector3(
+                float(spec.size.x),
+                float(spec.size.z),
+                0.24
+            ),
+            Color(0.13, 0.14, 0.13),
+            maxf(24.0, float(spec.mass)),
+            340.0,
+            "gate_panel"
+        )
+        var local_velocity := spec.linear_velocity as Vector3
+        debris.linear_velocity = transform.basis * Vector3(
+            local_velocity.x,
+            local_velocity.z,
+            0.0
+        )
+        debris.apply_central_impulse(
+            direction.normalized() * (280.0 + float(i) * 75.0)
+            + Vector3.UP * (75.0 + float(i) * 24.0)
+        )
+        debris.apply_torque_impulse(
+            Vector3(direction.z, 0.7, -direction.x) * 260.0
+        )
     MaterialFx.steel(get_parent(), break_pos, direction + Vector3.UP * 0.18, 5.2)
 
 func apply_world_loads(loads: Array, delta: float) -> void:
@@ -106,6 +178,8 @@ func apply_world_loads(loads: Array, delta: float) -> void:
     wedge_mass = 0.0
     var strongest_energy := 0.0
     var wedge_side := 0.0
+    for network in panel_networks:
+        network.clear_forces()
     for body in loads:
         if not is_instance_valid(body):
             continue
@@ -128,6 +202,19 @@ func apply_world_loads(loads: Array, delta: float) -> void:
                 strongest_energy,
                 0.5 * body_mass * normal_speed * normal_speed
             )
+            var panel_index := 0 if local.x <= 0.0 else 1
+            if panel_index < panel_networks.size():
+                panel_networks[panel_index].apply_force(
+                    Vector3(0.0, 0.0, local.y - 2.05),
+                    Vector3(
+                        body.linear_velocity.x * body_mass * 3.0,
+                        body.linear_velocity.z * body_mass * 3.0,
+                        body.linear_velocity.y * body_mass * 3.0
+                        - body_mass * 9.81
+                    )
+                )
+    for network in panel_networks:
+        network.step(delta)
     pry_energy = move_toward(
         pry_energy,
         strongest_energy,
@@ -148,3 +235,21 @@ func apply_world_loads(loads: Array, delta: float) -> void:
         -1.0
     )
     damage_panel(index, damage, direction.normalized())
+
+func get_load_path_state() -> Dictionary:
+    var max_damage := 0.0
+    var broken_fraction := 0.0
+    for network in panel_networks:
+        var state := network.get_deformation_state()
+        max_damage = maxf(max_damage, float(state.damage))
+        broken_fraction = maxf(
+            broken_fraction,
+            float(state.broken_fraction)
+        )
+    return {
+        "wedge_mass": wedge_mass,
+        "pry_energy": pry_energy,
+        "damage": max_damage,
+        "broken_fraction": broken_fraction,
+        "breached": breached
+    }

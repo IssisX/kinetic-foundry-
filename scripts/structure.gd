@@ -7,6 +7,9 @@ const ImpactFx = preload("res://scripts/impact_fx.gd")
 const StructuralDebris = preload(
     "res://scripts/structural_debris.gd"
 )
+const FractureNetwork = preload(
+    "res://scripts/fracture_network.gd"
+)
 
 signal structure_collapsed
 
@@ -22,6 +25,8 @@ var live_load_mass := 0.0
 var overload_ratio := 0.0
 var fatigue := 0.0
 var _overload_damage_bank := 0.0
+var deck_network: FractureNetwork
+var _network_damage_bank := 0.0
 
 func _ready() -> void:
     add_to_group("structure")
@@ -56,6 +61,14 @@ func _build_frame() -> void:
     add_child(deck)
     deck.add_child(GeomUtil.box_mesh(Vector3(9.4, 0.48, 6.0), Color(0.18, 0.19, 0.175), 0.90, 0.24))
     GeomUtil.add_box_collision(deck, Vector3(9.4, 0.48, 6.0))
+    deck_network = FractureNetwork.new()
+    deck_network.configure_grid(
+        5,
+        4,
+        Vector3(9.4, 0.0, 6.0),
+        950.0,
+        235.0
+    )
 
     for x in [-4.15, -2.05, 0.0, 2.05, 4.15]:
         var girder: MeshInstance3D = GeomUtil.box_mesh(Vector3(0.28, 0.58, 6.1), Color(0.29, 0.27, 0.20), 0.82, 0.30)
@@ -132,6 +145,12 @@ func damage_support(index: int, amount: float, direction: Vector3) -> void:
         0.0,
         support_health[index] - effective_amount
     )
+    if deck_network != null and is_instance_valid(supports[index]):
+        deck_network.apply_force(
+            to_local(supports[index].global_position),
+            direction.normalized() * effective_amount * 46.0
+        )
+        deck_network.step(1.0 / 60.0)
     var support: StaticBody3D = supports[index]
     if is_instance_valid(support):
         support.rotation.z += (
@@ -185,6 +204,12 @@ func _apply_pre_failure_pose() -> void:
     ) * 0.18
     var load_sag := overload_ratio * 0.22
     var sag := damage_sag + load_sag
+    var deformation := {}
+    if deck_network != null:
+        deformation = deck_network.get_deformation_state()
+        sag += minf(float(deformation.sag), 0.72)
+        roll += clampf(float(deformation.roll), -0.18, 0.18)
+        pitch += clampf(float(deformation.pitch), -0.16, 0.16)
     deck.rotation.x = pitch
     deck.rotation.z = roll
     deck.position.y = 5.05 - sag
@@ -217,6 +242,9 @@ func _evaluate_failure() -> void:
         if hp > 0.0:
             alive += 1
     if alive <= 2:
+        if deck_network != null:
+            deck_network.fracture_into_columns()
+            deck_network.step(0.024)
         collapsed = true
         collapse_age = 0.0
         deck.freeze = false
@@ -226,6 +254,39 @@ func _evaluate_failure() -> void:
         structure_collapsed.emit()
 
 func _spawn_aftermath() -> void:
+    if deck_network != null:
+        deck.freeze = true
+        deck.visible = false
+        deck.collision_layer = 0
+        deck.collision_mask = 0
+        var procedural_specs := deck_network.get_fragment_specs(0.34, 1)
+        if not procedural_specs.is_empty():
+            for i in procedural_specs.size():
+                var spec: Dictionary = procedural_specs[i]
+                var body := StructuralDebris.new()
+                body.position = spec.local_position
+                add_child(body)
+                body.configure(
+                    spec.size,
+                    Color(0.27, 0.25, 0.20),
+                    maxf(18.0, float(spec.mass)),
+                    180.0,
+                    "platform"
+                )
+                body.linear_velocity = (
+                    spec.linear_velocity
+                    + Vector3(
+                        (-1.0 if i % 2 == 0 else 1.0)
+                        * (1.8 + float(i) * 0.35),
+                        2.2 + float(i) * 0.32,
+                        (float(i) - 2.0) * 0.55
+                    )
+                )
+                body.angular_velocity = (
+                    spec.angular_velocity
+                    + Vector3(0.0, 0.35 * float(i % 2), 0.0)
+                )
+            return
     var pieces: Array = [
         [Vector3(-3.8, 4.8, -2.7), Vector3(2.8, 0.18, 0.18), 90.0],
         [Vector3(3.6, 4.9, 2.7), Vector3(3.2, 0.18, 0.18), 95.0],
@@ -257,6 +318,8 @@ func apply_world_loads(loads: Array, delta: float) -> void:
     var desired_brace: Array[float] = [0.0, 0.0, 0.0, 0.0]
     live_load_mass = 0.0
     var impact_energy := 0.0
+    if deck_network != null:
+        deck_network.clear_forces()
     for body in loads:
         if not is_instance_valid(body) or body == deck:
             continue
@@ -276,6 +339,12 @@ func apply_world_loads(loads: Array, delta: float) -> void:
                 )
                 impact_energy += (
                     0.5 * body_mass * down_speed * down_speed
+                )
+            if deck_network != null:
+                deck_network.apply_force(
+                    local,
+                    Vector3.DOWN * body_mass * 9.81
+                    + body.linear_velocity * body_mass * 3.4
                 )
         if local.y > 1.65 or body_mass < 55.0:
             continue
@@ -329,7 +398,33 @@ func apply_world_loads(loads: Array, delta: float) -> void:
         _overload_damage_bank -= damage
         var weakest := _weakest_unbraced_support()
         damage_support(weakest, damage, Vector3.DOWN)
+    if deck_network != null:
+        deck_network.step(delta)
+        var deformation := deck_network.get_deformation_state()
+        _network_damage_bank += (
+            float(deformation.damage) * delta * 2.4
+            + float(deformation.broken_fraction) * delta * 5.0
+        )
+        if _network_damage_bank >= 1.0:
+            _network_damage_bank -= 1.0
+            damage_support(
+                _weakest_unbraced_support(),
+                2.5,
+                Vector3.DOWN
+            )
     _apply_pre_failure_pose()
+
+func get_load_path_state() -> Dictionary:
+    var deformation := {}
+    if deck_network != null:
+        deformation = deck_network.get_deformation_state()
+    return {
+        "live_load_mass": live_load_mass,
+        "overload_ratio": overload_ratio,
+        "fatigue": fatigue,
+        "deformation": deformation,
+        "collapsed": collapsed
+    }
 
 func _load_profile(body: Node) -> Dictionary:
     if body.has_method("get_load_profile"):
