@@ -1,5 +1,23 @@
 extends "res://scripts/excavator.gd"
 
+func get_operator_view_anchor() -> Node3D:
+    return get_node_or_null("OperatorView") as Node3D
+
+func get_operator_fov() -> float:
+    return 78.0
+
+func get_control_profile() -> Dictionary:
+    return {
+        "machine_name": "EXCAVATOR",
+        "mode": "OPERATOR POV // HYDRAULIC WORKER CONTROL",
+        "primary": "CURL / SMASH",
+        "secondary": "RELEASE" if is_holding_load() else "CLAMP",
+        "tertiary": "EXIT",
+        "left_hint": "DRIVE / STEER",
+        "right_hint": "SWING BOOM / LIFT",
+        "center_hint": "BUCKET FORCE + LOAD PATH"
+    }
+
 func _collect_hard_arm_contacts() -> Array[Node]:
     var contacts: Array[Node] = []
     if _arm_shapes.is_empty() or get_world_3d() == null:
@@ -77,3 +95,7 @@ func _push_dynamic_arm_contacts() -> void:
                 var contact_offset: Vector3 = body.to_local(collision.global_position)
                 body.apply_impulse(direction * impulse_mag + Vector3.UP * body.mass * 0.55, contact_offset)
                 body.apply_torque_impulse(Vector3(direction.z, 0.18, -direction.x) * body.mass * minf(speed, 8.0) * 0.28)
+
+    if not affected.is_empty() and player_driver != null and camera_rig != null and camera_rig.has_method("add_machine_impulse"):
+        var local_bump := Vector3(direction.x, minf(speed * 0.035, 0.7), direction.z)
+        camera_rig.add_machine_impulse(clampf(0.010 + speed * 0.0018, 0.012, 0.050), local_bump)
