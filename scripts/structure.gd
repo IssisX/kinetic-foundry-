@@ -4,6 +4,9 @@ extends Node3D
 const GeomUtil = preload("res://scripts/geom.gd")
 const SupportScript = preload("res://scripts/support.gd")
 const ImpactFx = preload("res://scripts/impact_fx.gd")
+const StructuralDebris = preload(
+    "res://scripts/structural_debris.gd"
+)
 
 signal structure_collapsed
 
@@ -14,6 +17,11 @@ var deck: RigidBody3D
 var collapsed := false
 var collapse_age := 0.0
 var _aftermath_spawned := false
+var support_brace: Array[float] = [0.0, 0.0, 0.0, 0.0]
+var live_load_mass := 0.0
+var overload_ratio := 0.0
+var fatigue := 0.0
+var _overload_damage_bank := 0.0
 
 func _ready() -> void:
     add_to_group("structure")
@@ -118,18 +126,27 @@ func damage_support(index: int, amount: float, direction: Vector3) -> void:
         return
     if support_health[index] <= 0.0:
         return
-    support_health[index] = maxf(0.0, support_health[index] - amount)
+    var brace := support_brace[index]
+    var effective_amount := amount * (1.0 - brace * 0.62)
+    support_health[index] = maxf(
+        0.0,
+        support_health[index] - effective_amount
+    )
     var support: StaticBody3D = supports[index]
     if is_instance_valid(support):
-        support.rotation.z += direction.x * amount * 0.0009
-        support.rotation.x -= direction.z * amount * 0.0009
+        support.rotation.z += (
+            direction.x * effective_amount * 0.0009
+        )
+        support.rotation.x -= (
+            direction.z * effective_amount * 0.0009
+        )
     _update_support_material(index)
     ImpactFx.spawn(
         get_parent(),
         supports[index].global_position + Vector3.UP * 1.1 if is_instance_valid(supports[index]) else global_position,
         direction,
         Color(0.92, 0.56, 0.12),
-        clampf(amount / 22.0, 0.8, 3.2),
+        clampf(effective_amount / 22.0, 0.8, 3.2),
         8
     )
     if support_health[index] <= 0.0:
@@ -161,7 +178,13 @@ func _apply_pre_failure_pose() -> void:
     var roll: float = clampf((right_capacity - left_capacity) / 200.0, -1.0, 1.0) * 0.075
     var pitch: float = clampf((south_capacity - north_capacity) / 200.0, -1.0, 1.0) * 0.060
     var total_capacity: float = left_capacity + right_capacity
-    var sag: float = clampf((400.0 - total_capacity) / 400.0, 0.0, 1.0) * 0.18
+    var damage_sag := clampf(
+        (400.0 - total_capacity) / 400.0,
+        0.0,
+        1.0
+    ) * 0.18
+    var load_sag := overload_ratio * 0.22
+    var sag := damage_sag + load_sag
     deck.rotation.x = pitch
     deck.rotation.z = roll
     deck.position.y = 5.05 - sag
@@ -173,14 +196,16 @@ func _break_support(index: int, direction: Vector3) -> void:
     var pos: Vector3 = old.global_position
     old.queue_free()
 
-    var debris: RigidBody3D = RigidBody3D.new()
+    var debris = StructuralDebris.new()
     debris.position = to_local(pos)
-    debris.mass = 180.0
-    debris.collision_layer = 8
-    debris.collision_mask = 1 | 2 | 4 | 8
     add_child(debris)
-    debris.add_child(GeomUtil.box_mesh(Vector3(0.72, 4.6, 0.72), Color(0.31, 0.27, 0.18), 0.92, 0.30))
-    GeomUtil.add_box_collision(debris, Vector3(0.72, 4.6, 0.72))
+    debris.configure(
+        Vector3(0.72, 4.6, 0.72),
+        Color(0.31, 0.27, 0.18),
+        180.0,
+        260.0,
+        "support"
+    )
     debris.apply_central_impulse(direction.normalized() * 2200.0 + Vector3.UP * 520.0)
     debris.apply_torque_impulse(Vector3(direction.z, 0.6, -direction.x) * 900.0)
 
@@ -211,15 +236,132 @@ func _spawn_aftermath() -> void:
     ]
     for i in pieces.size():
         var entry: Array = pieces[i]
-        var body: RigidBody3D = RigidBody3D.new()
+        var body = StructuralDebris.new()
         body.position = entry[0] as Vector3
-        body.mass = float(entry[2])
-        body.collision_layer = 8
-        body.collision_mask = 1 | 2 | 4 | 8
         add_child(body)
         var piece_size: Vector3 = entry[1] as Vector3
-        body.add_child(GeomUtil.box_mesh(piece_size, Color(0.27, 0.25, 0.20), 0.92, 0.31))
-        GeomUtil.add_box_collision(body, piece_size)
+        body.configure(
+            piece_size,
+            Color(0.27, 0.25, 0.20),
+            float(entry[2]),
+            180.0,
+            "platform"
+        )
         var side: float = -1.0 if i % 2 == 0 else 1.0
         body.apply_central_impulse(Vector3(side * (120.0 + i * 18.0), 80.0 + i * 24.0, (i - 2) * 42.0))
         body.apply_torque_impulse(Vector3(180.0, side * 260.0, 140.0))
+
+func apply_world_loads(loads: Array, delta: float) -> void:
+    if collapsed or deck == null:
+        return
+    var desired_brace: Array[float] = [0.0, 0.0, 0.0, 0.0]
+    live_load_mass = 0.0
+    var impact_energy := 0.0
+    for body in loads:
+        if not is_instance_valid(body) or body == deck:
+            continue
+        var local := to_local(body.global_position)
+        var body_mass: float = float(body.get("mass"))
+        if (
+            absf(local.x) < 5.0
+            and absf(local.z) < 3.4
+            and local.y > 4.65
+            and local.y < 6.35
+        ):
+            live_load_mass += body_mass
+            if body is RigidBody3D:
+                var down_speed := maxf(
+                    0.0,
+                    -body.linear_velocity.y
+                )
+                impact_energy += (
+                    0.5 * body_mass * down_speed * down_speed
+                )
+        if local.y > 1.65 or body_mass < 55.0:
+            continue
+        var profile := _load_profile(body)
+        for i in supports.size():
+            if not is_instance_valid(supports[i]):
+                continue
+            var distance: float = body.global_position.distance_to(
+                supports[i].global_position - Vector3.UP * 1.8
+            )
+            if distance < 1.75:
+                desired_brace[i] = maxf(
+                    desired_brace[i],
+                    clampf(
+                        body_mass / 260.0
+                        * float(profile.brace_quality),
+                        0.0,
+                        0.72
+                    )
+                )
+    for i in support_brace.size():
+        support_brace[i] = move_toward(
+            support_brace[i],
+            desired_brace[i],
+            delta * 1.8
+        )
+
+    var health_capacity := 0.0
+    for hp in support_health:
+        health_capacity += hp
+    var safe_mass := 280.0 + health_capacity * 1.55
+    overload_ratio = clampf(
+        (live_load_mass - safe_mass) / 520.0,
+        0.0,
+        1.6
+    )
+    fatigue = clampf(
+        fatigue
+        + overload_ratio * delta * 0.17
+        + impact_energy * 0.0000008
+        - delta * 0.008,
+        0.0,
+        1.0
+    )
+    _overload_damage_bank += (
+        overload_ratio * overload_ratio * delta * 18.0
+        + impact_energy * 0.00006
+    )
+    if _overload_damage_bank >= 1.0:
+        var damage := minf(_overload_damage_bank, 8.0)
+        _overload_damage_bank -= damage
+        var weakest := _weakest_unbraced_support()
+        damage_support(weakest, damage, Vector3.DOWN)
+    _apply_pre_failure_pose()
+
+func _load_profile(body: Node) -> Dictionary:
+    if body.has_method("get_load_profile"):
+        return body.get_load_profile()
+    var size_value = body.get_meta(
+        "load_size",
+        Vector3.ONE
+    )
+    var size: Vector3 = size_value as Vector3
+    var longest := maxf(size.x, maxf(size.y, size.z))
+    var shortest := maxf(
+        0.08,
+        minf(size.x, minf(size.y, size.z))
+    )
+    return {
+        "brace_quality": clampf(
+            longest / shortest / 12.0,
+            0.15,
+            1.0
+        )
+    }
+
+func _weakest_unbraced_support() -> int:
+    var result := 0
+    var weakest := INF
+    for i in support_health.size():
+        if support_health[i] <= 0.0:
+            continue
+        var effective := support_health[i] * (
+            1.0 + support_brace[i] * 0.8
+        )
+        if effective < weakest:
+            weakest = effective
+            result = i
+    return result

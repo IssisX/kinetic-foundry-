@@ -11,6 +11,9 @@ const FacilityExpansionScene = preload("res://scripts/facility_expansion.gd")
 const HazardFieldScene = preload("res://scripts/hazard_field.gd")
 const MissionDirectorScene = preload("res://scripts/mission_director.gd")
 const CaptureRunnerScene = preload("res://scripts/visual_capture.gd")
+const LoadPathCouplerScene = preload(
+    "res://scripts/load_path_coupler.gd"
+)
 
 var hud
 var camera_rig
@@ -21,6 +24,7 @@ var yard
 var facility_expansion
 var hazards
 var mission
+var load_path_coupler
 
 var _reclaim_timer := 0.0
 var _reclaim_cooldown := 2.5
@@ -137,6 +141,10 @@ func _build_gameplay() -> void:
     structure.position = Vector3(11.0, 0.0, -14.0)
     add_child(structure)
     structure.structure_collapsed.connect(_on_structure_collapsed_camera)
+
+    load_path_coupler = LoadPathCouplerScene.new()
+    add_child(load_path_coupler)
+    load_path_coupler.configure(structure, excavator)
 
 func _build_mission() -> void:
     mission = MissionDirectorScene.new()

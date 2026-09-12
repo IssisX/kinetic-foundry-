@@ -101,7 +101,16 @@ func get_track_ratio() -> float:
 
 func get_tool_force() -> float:
     var chassis_speed := Vector3(velocity.x, 0.0, velocity.z).length()
-    return 16.0 + chassis_speed * 10.0 + minf(_tool_tip_speed, 15.0) * 5.8
+    var base_force := (
+        16.0
+        + chassis_speed * 10.0
+        + minf(_tool_tip_speed, 15.0) * 5.8
+    )
+    if not is_holding_load():
+        return base_force
+    var load_mass: float = float(held_load.get("mass"))
+    var inertia_gain := clampf(load_mass / 310.0, 0.0, 1.35)
+    return base_force * (1.0 + inertia_gain * 0.72)
 
 func is_holding_load() -> bool:
     return held_load != null and is_instance_valid(held_load)
@@ -416,7 +425,9 @@ func _try_grip_load() -> bool:
     held_load = best
     if held_load.has_method("set_held"):
         held_load.set_held(true)
-    hud.set_context("LOAD CLAMPED // MOVE ARM TO CARRY // CLAMP TO RELEASE")
+    hud.set_context(
+        "LOAD CLAMPED // MASS AMPLIFIES IMPACT + BRACING"
+    )
     return true
 
 func _update_held_load() -> void:

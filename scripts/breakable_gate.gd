@@ -3,10 +3,16 @@ extends Node3D
 const GeomUtil = preload("res://scripts/geom.gd")
 const MaterialFx = preload("res://scripts/material_fx.gd")
 const GatePanelScript = preload("res://scripts/gate_panel.gd")
+const StructuralDebris = preload(
+    "res://scripts/structural_debris.gd"
+)
 
 var panel_health := [120.0, 120.0]
 var panels: Array[StaticBody3D] = []
 var breached := false
+var wedge_mass := 0.0
+var pry_energy := 0.0
+var _load_damage_bank := 0.0
 
 func _ready() -> void:
     add_to_group("breachable")
@@ -80,14 +86,65 @@ func _break_panel(index: int, direction: Vector3) -> void:
     var transform := old.global_transform
     var break_pos := old.global_position
     old.queue_free()
-    var debris := RigidBody3D.new()
-    debris.global_transform = transform
-    debris.mass = 310.0
-    debris.collision_layer = 8
-    debris.collision_mask = 1 | 2 | 4 | 8
+    var debris = StructuralDebris.new()
     get_parent().add_child(debris)
-    debris.add_child(GeomUtil.box_mesh(Vector3(4.0, 4.0, 0.24), Color(0.13, 0.14, 0.13), 0.94, 0.30))
-    GeomUtil.add_box_collision(debris, Vector3(4.0, 4.0, 0.24))
+    debris.global_transform = transform
+    debris.configure(
+        Vector3(4.0, 4.0, 0.24),
+        Color(0.13, 0.14, 0.13),
+        310.0,
+        340.0,
+        "gate_panel"
+    )
     debris.apply_central_impulse(direction.normalized() * 1850.0 + Vector3.UP * 420.0)
     debris.apply_torque_impulse(Vector3(direction.z, 0.7, -direction.x) * 1250.0)
     MaterialFx.steel(get_parent(), break_pos, direction + Vector3.UP * 0.18, 5.2)
+
+func apply_world_loads(loads: Array, delta: float) -> void:
+    if breached:
+        return
+    wedge_mass = 0.0
+    var strongest_energy := 0.0
+    var wedge_side := 0.0
+    for body in loads:
+        if not is_instance_valid(body):
+            continue
+        var local := to_local(body.global_position)
+        if (
+            absf(local.x) > 4.25
+            or absf(local.z) > 1.10
+            or local.y < 0.05
+            or local.y > 4.45
+        ):
+            continue
+        var body_mass: float = float(body.get("mass"))
+        if body_mass < 45.0:
+            continue
+        wedge_mass += body_mass
+        wedge_side += signf(local.x) * body_mass
+        if body is RigidBody3D:
+            var normal_speed := absf(body.linear_velocity.z)
+            strongest_energy = maxf(
+                strongest_energy,
+                0.5 * body_mass * normal_speed * normal_speed
+            )
+    pry_energy = move_toward(
+        pry_energy,
+        strongest_energy,
+        delta * 18000.0
+    )
+    _load_damage_bank += (
+        maxf(0.0, wedge_mass - 90.0) * delta * 0.012
+        + strongest_energy * 0.00005
+    )
+    if _load_damage_bank < 1.0:
+        return
+    var damage := minf(_load_damage_bank, 9.0)
+    _load_damage_bank -= damage
+    var index := 0 if wedge_side <= 0.0 else 1
+    var direction := Vector3(
+        -1.0 if index == 0 else 1.0,
+        0.12,
+        -1.0
+    )
+    damage_panel(index, damage, direction.normalized())
