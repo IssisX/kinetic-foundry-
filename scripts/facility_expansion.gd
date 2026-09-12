@@ -50,46 +50,53 @@ func _build_expanded_floor() -> void:
 func _build_daylight_canopy() -> void:
     var steel := Color(0.26, 0.285, 0.29)
     var dark_steel := Color(0.12, 0.14, 0.145)
-    var roof_y := 20.5
+    # The canopy is intentionally high. The old low truss web filled Fold-class
+    # views with diagonal bars and made the yard read like a cage instead of a
+    # large sunlit industrial hall.
+    var roof_y := 24.0
+    var column_height := 23.5
 
     for x in [-50.0, 50.0]:
         for z in [-44.0, -22.0, 0.0, 22.0, 44.0]:
-            GeomUtil.static_box(self, "CanopyColumn", Vector3(float(x), 10.0, float(z)), Vector3(0.75, 20.0, 0.75), dark_steel)
+            GeomUtil.static_box(self, "CanopyColumn", Vector3(float(x), column_height * 0.5, float(z)), Vector3(0.75, column_height, 0.75), dark_steel)
             var foot: MeshInstance3D = GeomUtil.box_mesh(Vector3(2.3, 0.45, 2.3), Color(0.18, 0.19, 0.18), 0.86, 0.22)
             foot.position = Vector3(float(x), 0.22, float(z))
             add_child(foot)
 
+    # Primary roof girders only. The previous oversized diagonal braces crossed
+    # the gameplay camera and read as broken white geometry.
     for z in [-44.0, -22.0, 0.0, 22.0, 44.0]:
-        var cross: MeshInstance3D = GeomUtil.box_mesh(Vector3(101.0, 0.48, 0.52), steel, 0.66, 0.34)
+        var cross: MeshInstance3D = GeomUtil.box_mesh(Vector3(101.0, 0.42, 0.46), steel, 0.66, 0.34)
         cross.position = Vector3(0.0, roof_y, float(z))
         add_child(cross)
-        for x in range(-45, 46, 10):
-            var brace: MeshInstance3D = GeomUtil.box_mesh(Vector3(0.22, 3.4, 0.24), Color(0.52, 0.54, 0.50), 0.68, 0.24)
-            brace.position = Vector3(float(x), roof_y - 1.15, float(z))
-            brace.rotation.z = 0.72 if (x / 10) % 2 == 0 else -0.72
-            add_child(brace)
 
     for x in [-40.0, -20.0, 0.0, 20.0, 40.0]:
-        var long_beam: MeshInstance3D = GeomUtil.box_mesh(Vector3(0.42, 0.42, 92.0), steel, 0.66, 0.34)
-        long_beam.position = Vector3(float(x), roof_y + 0.05, 0.0)
+        var long_beam: MeshInstance3D = GeomUtil.box_mesh(Vector3(0.38, 0.38, 92.0), steel, 0.66, 0.34)
+        long_beam.position = Vector3(float(x), roof_y + 0.04, 0.0)
         add_child(long_beam)
 
-    var glass: StandardMaterial3D = GeomUtil.glass_material(Color(0.50, 0.76, 0.94, 0.115), 0.08, 0.04)
+    # Thin mullions keep the glass structurally legible without turning the roof
+    # into foreground visual noise.
+    for x in [-30.0, -10.0, 10.0, 30.0]:
+        var mullion: MeshInstance3D = GeomUtil.box_mesh(Vector3(0.10, 0.12, 92.0), dark_steel, 0.72, 0.26)
+        mullion.position = Vector3(float(x), roof_y + 0.16, 0.0)
+        add_child(mullion)
+
+    var glass: StandardMaterial3D = GeomUtil.glass_material(Color(0.50, 0.76, 0.94, 0.095), 0.06, 0.03)
     for xi in 5:
         for zi in 5:
             if xi == 2 and zi == 2:
                 continue
-            var pane: MeshInstance3D = GeomUtil.box_mesh(Vector3(18.4, 0.035, 17.0), Color.WHITE)
+            var pane: MeshInstance3D = GeomUtil.box_mesh(Vector3(18.4, 0.028, 17.0), Color.WHITE)
             pane.material_override = glass
-            pane.position = Vector3(-40.0 + float(xi) * 20.0, roof_y + 0.28, -36.0 + float(zi) * 18.0)
+            pane.position = Vector3(-40.0 + float(xi) * 20.0, roof_y + 0.20, -36.0 + float(zi) * 18.0)
             add_child(pane)
 
-    var skylight_ring: MeshInstance3D = GeomUtil.box_mesh(Vector3(20.0, 0.24, 0.32), Color(0.68, 0.69, 0.65), 0.54, 0.40)
-    skylight_ring.position = Vector3(0.0, roof_y + 0.22, -9.0)
-    add_child(skylight_ring)
-    var skylight_ring_2: MeshInstance3D = skylight_ring.duplicate() as MeshInstance3D
-    skylight_ring_2.position.z = 9.0
-    add_child(skylight_ring_2)
+    # Central open skylight - actual open air, not an opaque roof patch.
+    for z in [-9.0, 9.0]:
+        var skylight_edge: MeshInstance3D = GeomUtil.box_mesh(Vector3(20.0, 0.18, 0.22), Color(0.42, 0.45, 0.44), 0.58, 0.34)
+        skylight_edge.position = Vector3(0.0, roof_y + 0.20, float(z))
+        add_child(skylight_edge)
 
 func _build_distant_industry() -> void:
     var colors: Array[Color] = [Color(0.18, 0.20, 0.20), Color(0.22, 0.21, 0.18), Color(0.15, 0.19, 0.21)]
