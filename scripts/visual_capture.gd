@@ -216,7 +216,16 @@ func _stage_gait_observables() -> void:
     for _i in 120:
         await _advance_gait_frame(rig, walk_velocity)
         var state: Dictionary = rig.get_gait_observables()
-        if not state.double_support:
+        var swing: Dictionary = (
+            state.left
+            if not state.left.planted
+            else state.right
+        )
+        if (
+            not state.double_support
+            and swing.swing_progress > 0.34
+            and swing.swing_progress < 0.66
+        ):
             break
 
     var focus: Vector3 = game.player.global_position
@@ -262,10 +271,11 @@ func _stage_gait_observables() -> void:
     await _settle_frames(8)
     _capture("08_walk_double_support.png")
 
-    print(
-        "GAIT_ACCEPTANCE ",
-        JSON.stringify(rig.get_gait_acceptance_window())
+    var acceptance: Dictionary = (
+        rig.get_gait_acceptance_window()
     )
+    print("GAIT_ACCEPTANCE ", JSON.stringify(acceptance))
+    _assert_gait_acceptance(acceptance)
     rig.set_gait_debug_enabled(false)
 
 func _advance_gait_frame(rig, velocity: Vector3) -> void:
@@ -281,6 +291,25 @@ func _advance_gait_frame(rig, velocity: Vector3) -> void:
         false
     )
     await get_tree().physics_frame
+
+func _assert_gait_acceptance(data: Dictionary) -> void:
+    var valid: bool = (
+        data.duration >= 3.99
+        and data.left_stance_fraction > 0.52
+        and data.left_stance_fraction < 0.78
+        and data.right_stance_fraction > 0.52
+        and data.right_stance_fraction < 0.78
+        and data.double_support_fraction > 0.06
+        and data.double_support_fraction < 0.34
+        and data.max_planted_velocity < 0.045
+        and data.max_ground_error < 0.030
+    )
+    if not valid:
+        push_error(
+            "GAIT_ACCEPTANCE_FAILED %s"
+            % JSON.stringify(data)
+        )
+        get_tree().quit(4)
 
 func _set_machine_hud() -> void:
     if game.hud.has_method("set_machine_profile") and game.excavator.has_method("get_control_profile"):

@@ -22,7 +22,7 @@ const LEG_LEN := THIGH_LEN + SHIN_LEN
 const ANKLE_TO_SOLE := 0.125
 const FOOT_HALF_LENGTH := 0.21
 const STEP_WIDTH := 0.09
-const BASE_PELVIS_HEIGHT := 1.055
+const BASE_PELVIS_HEIGHT := 0.94
 const GRAVITY := 9.81
 const V_COMFORT := 0.45 * sqrt(GRAVITY * LEG_LEN)
 const V_RUN := 0.75 * sqrt(GRAVITY * LEG_LEN)
@@ -423,19 +423,24 @@ func _begin_swing(state: FootState) -> void:
         )
 
     var ahead := (
-        forward * _step_length * 0.58 * step_scale
+        forward * _step_length * 0.52 * step_scale
     )
     var side := right * STEP_WIDTH * 0.5 * state.side
-    var lead := velocity * state.swing_duration * 0.55
+    var predicted_root := (
+        root.global_position
+        + velocity * state.swing_duration
+    )
     if _mode == MODE_STOP:
-        lead *= 0.22
-    var candidate := root.global_position + ahead + side + lead
-    var horizontal := candidate - root.global_position
+        predicted_root = root.global_position + velocity * (
+            state.swing_duration * 0.22
+        )
+    var candidate := predicted_root + ahead + side
+    var horizontal := candidate - predicted_root
     horizontal.y = 0.0
-    var max_lead := LEG_LEN * 0.44
+    var max_lead := LEG_LEN * 0.38
     if horizontal.length() > max_lead:
         candidate = (
-            root.global_position
+            predicted_root
             + horizontal.normalized() * max_lead
         )
 
@@ -773,7 +778,7 @@ func _solve_leg(
     )
     state.knee_flex = PI - acos(cosine)
     knee.rotation = Vector3(
-        -state.knee_flex,
+        state.knee_flex,
         0.0,
         0.0
     )
@@ -1034,7 +1039,13 @@ func _foot_observables(
             state.knee_flex
         ),
         "planted_velocity": state.planted_velocity,
-        "ground_error": state.ground_error
+        "ground_error": state.ground_error,
+        "swing_progress": clampf(
+            state.swing_time
+            / maxf(state.swing_duration, 0.001),
+            0.0,
+            1.0
+        )
     }
 
 func _reset_acceptance_window() -> void:

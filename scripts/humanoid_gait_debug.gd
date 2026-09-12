@@ -29,8 +29,9 @@ func _ready() -> void:
     _right_reach = _line(Color(0.96, 0.72, 0.12))
 
     _label = Label3D.new()
-    _label.font_size = 32
-    _label.outline_size = 8
+    _label.font_size = 20
+    _label.outline_size = 5
+    _label.pixel_size = 0.0025
     _label.modulate = Color(0.92, 0.97, 1.0)
     _label.no_depth_test = true
     _label.billboard = BaseMaterial3D.BILLBOARD_ENABLED
@@ -81,20 +82,20 @@ func present(data: Dictionary) -> void:
             right_contact + Vector3.UP * 0.025
         )
 
-    _label.global_position = com + Vector3.UP * 0.72
+    _label.global_position = com + Vector3.UP * 1.22
     _label.text = (
         "%s  phi %.3f  DS %s\n"
-        + "L %s v %.3f reach %.2f  "
-        + "R %s v %.3f reach %.2f"
+        + "L %s  R %s\n"
+        + "plant v %.3f / %.3f  reach %.2f / %.2f"
     ) % [
         data.mode,
         data.phase,
         "YES" if data.double_support else "NO",
         left.state,
-        left.planted_velocity,
-        left.reach,
         right.state,
+        left.planted_velocity,
         right.planted_velocity,
+        left.reach,
         right.reach
     ]
 
