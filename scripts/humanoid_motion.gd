@@ -73,7 +73,7 @@ var _idle_time := 0.0
 var _com_world := Vector3.ZERO
 var _support_world := Vector3.ZERO
 var _double_support := true
-var _debug: HumanoidGaitDebug
+var _debug
 
 var _sample_time := 0.0
 var _left_stance_time := 0.0
