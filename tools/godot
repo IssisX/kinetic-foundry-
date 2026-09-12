@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+readonly GODOT_VERSION="4.3-stable"
+readonly GODOT_ARCHIVE="Godot_v4.3-stable_linux.x86_64"
+readonly GODOT_URL="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}/${GODOT_ARCHIVE}.zip"
+
+cache_root="${KINETIC_GODOT_HOME:-${XDG_CACHE_HOME:-$PWD/.tools}/kinetic-foundry}"
+godot_bin="${cache_root}/${GODOT_ARCHIVE}"
+
+if [[ ! -x "${godot_bin}" ]]; then
+    mkdir -p "${cache_root}"
+    archive="$(mktemp "${cache_root}/godot.XXXXXX.zip")"
+    trap 'rm -f "${archive}"' EXIT
+    curl -L --fail --retry 3 "${GODOT_URL}" -o "${archive}"
+    unzip -q -o "${archive}" -d "${cache_root}"
+    chmod +x "${godot_bin}"
+fi
+
+exec "${godot_bin}" "$@"

@@ -136,6 +136,7 @@ func _build_gameplay() -> void:
     structure = StructureScene.new()
     structure.position = Vector3(11.0, 0.0, -14.0)
     add_child(structure)
+    structure.structure_collapsed.connect(_on_structure_collapsed_camera)
 
 func _build_mission() -> void:
     mission = MissionDirectorScene.new()
@@ -190,6 +191,16 @@ func _on_machine_disabled(machine) -> void:
         machine.exit_player()
     hud.set_context("EXCAVATOR DISABLED // RETURN TO FOOT CONTROL")
     _retarget_enemies(player)
+
+func _on_structure_collapsed_camera() -> void:
+    if camera_rig == null or structure == null:
+        return
+    var focus: Vector3 = (
+        structure.global_position + Vector3.UP * 2.4
+    )
+    if structure.deck != null and is_instance_valid(structure.deck):
+        focus = structure.deck.global_position
+    camera_rig.compose_collapse(focus, 11.0)
 
 func _update_interaction_prompt() -> void:
     if hud == null or not hud.has_method("set_interaction_hint") or player == null or excavator == null:

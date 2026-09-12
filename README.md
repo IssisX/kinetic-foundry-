@@ -25,3 +25,10 @@ Godot 4.3 source-first rebuild for Android/mobile.
 - E: use / enter machine.
 
 Touch is the primary target. Desktop input exists for quick verification.
+
+## Pinned engine
+
+Run the project through `./tools/godot --path .`. The wrapper installs the
+pinned Godot 4.3 build once into a reusable cache, then delegates all
+arguments to it. Set `KINETIC_GODOT_HOME` to share that cache across
+checkouts.

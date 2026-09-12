@@ -43,6 +43,8 @@ func _run() -> void:
     await _settle_frames(8)
     _capture("06_breached_route.png")
 
+    await _stage_gait_observables()
+
     print("CAPTURE_SUITE_OK dir=", capture_dir)
     get_tree().quit(0)
 
@@ -184,6 +186,101 @@ func _stage_breach_gate() -> void:
     game.hud.set_machine_telemetry(0.79, 0.72, 0.86, 0.94, false)
     game.hud.set_context("ACCESS OPEN // DEBRIS REMAINS IN WORLD")
     _camera(gate.global_position + Vector3(11.0, 7.0, -12.0), gate.global_position + Vector3(0.0, 1.6, 0.0), 52.0)
+
+func _stage_gait_observables() -> void:
+    _show_all_enemies(false)
+    game.excavator.visible = false
+    game.player.visible = true
+    game.player.global_position = Vector3(-1.2, 0.03, 13.5)
+    game.player.rotation = Vector3.ZERO
+    game.player.attack_anim = 0.0
+    game.player.hit_anim = 0.0
+
+    var rig = game.player._rig
+    if rig == null:
+        push_error("CAPTURE_GAIT_RIG_MISSING")
+        get_tree().quit(3)
+        return
+    rig.reset_gait_state()
+    rig.set_gait_debug_enabled(true)
+
+    var walk_speed := 1.28
+    var walk_velocity := Vector3(0.0, 0.0, -walk_speed)
+    game.player.velocity = walk_velocity
+    game.player.force_update_transform()
+    await get_tree().physics_frame
+
+    for _i in 270:
+        await _advance_gait_frame(rig, walk_velocity)
+
+    for _i in 120:
+        await _advance_gait_frame(rig, walk_velocity)
+        var state: Dictionary = rig.get_gait_observables()
+        if not state.double_support:
+            break
+
+    var focus: Vector3 = game.player.global_position
+    _clear_machine_hud()
+    game.hud.set_target(null)
+    game.hud.set_health(1.0)
+    game.hud.set_objective(
+        "WORLD-SPACE WALK SOLVER",
+        "SINGLE SUPPORT // SWING CLEARANCE // FORWARD KNEE POLE"
+    )
+    game.hud.set_objective_progress(0.72)
+    game.hud.set_context(
+        "PLANTED CONTACTS // COM TRANSFER // ANALYTIC IK"
+    )
+    _camera(
+        focus + Vector3(4.8, 2.65, -3.8),
+        focus + Vector3(0.0, 1.05, 0.0),
+        46.0
+    )
+    await _settle_frames(8)
+    _capture("07_walk_single_support.png")
+
+    for _i in 120:
+        await _advance_gait_frame(rig, walk_velocity)
+        var state: Dictionary = rig.get_gait_observables()
+        if state.double_support:
+            break
+
+    focus = game.player.global_position
+    game.hud.set_objective(
+        "WORLD-SPACE WALK SOLVER",
+        "DOUBLE SUPPORT // HEEL STRIKE // TOE RELEASE"
+    )
+    game.hud.set_objective_progress(0.86)
+    game.hud.set_context(
+        "NO FLIGHT PHASE // SUPPORT BRIDGE // GROUNDED FEET"
+    )
+    _camera(
+        focus + Vector3(-4.4, 2.45, -3.4),
+        focus + Vector3(0.0, 1.00, 0.0),
+        47.0
+    )
+    await _settle_frames(8)
+    _capture("08_walk_double_support.png")
+
+    print(
+        "GAIT_ACCEPTANCE ",
+        JSON.stringify(rig.get_gait_acceptance_window())
+    )
+    rig.set_gait_debug_enabled(false)
+
+func _advance_gait_frame(rig, velocity: Vector3) -> void:
+    const STEP := 1.0 / 60.0
+    game.player.global_position += velocity * STEP
+    game.player.force_update_transform()
+    rig.animate(
+        STEP,
+        velocity.length(),
+        game.player.speed,
+        0.0,
+        0.0,
+        false
+    )
+    await get_tree().physics_frame
 
 func _set_machine_hud() -> void:
     if game.hud.has_method("set_machine_profile") and game.excavator.has_method("get_control_profile"):

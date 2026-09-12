@@ -66,6 +66,7 @@ func receive_enemy_hit(damage: float) -> void:
     hit_anim = 0.28
     if hud != null and hud.has_method("flash_damage"):
         hud.flash_damage()
+    _compose_camera_impact(global_position + Vector3.UP * 1.05, applied / 34.0)
 
 func receive_hazard_hit(damage: float, impulse: Vector3) -> void:
     var hazard_scale: float = 1.0 - clampf(hazard_reduction, 0.0, 0.8)
@@ -165,8 +166,9 @@ func _physics_process(delta: float) -> void:
     var forward: Vector3 = camera_rig.flat_forward()
     var right: Vector3 = camera_rig.flat_right()
     var desired: Vector3 = right * axis.x + forward * -axis.y
-    var target_speed: float = speed
-    if axis.length() > 0.94:
+    var input_strength := axis.length()
+    var target_speed := speed * input_strength
+    if input_strength > 0.94:
         target_speed = sprint_speed
     if attack_anim > 0.0:
         target_speed *= 0.42
@@ -174,13 +176,41 @@ func _physics_process(delta: float) -> void:
     if traversal_lock <= 0.0:
         if desired.length_squared() > 0.001:
             desired = desired.normalized()
-            velocity.x = move_toward(velocity.x, desired.x * target_speed, 32.0 * delta)
-            velocity.z = move_toward(velocity.z, desired.z * target_speed, 32.0 * delta)
+            var acceleration := (
+                3.8 if target_speed < 2.25 else 19.0
+            )
+            velocity.x = move_toward(
+                velocity.x,
+                desired.x * target_speed,
+                acceleration * delta
+            )
+            velocity.z = move_toward(
+                velocity.z,
+                desired.z * target_speed,
+                acceleration * delta
+            )
             if attack_anim <= 0.0:
-                rotation.y = lerp_angle(rotation.y, atan2(-desired.x, -desired.z), 0.22)
+                rotation.y = rotate_toward(
+                    rotation.y,
+                    atan2(-desired.x, -desired.z),
+                    deg_to_rad(150.0) * delta
+                )
         else:
-            velocity.x = move_toward(velocity.x, 0.0, 30.0 * delta)
-            velocity.z = move_toward(velocity.z, 0.0, 30.0 * delta)
+            var braking := (
+                3.5
+                if Vector2(velocity.x, velocity.z).length() < 2.25
+                else 18.0
+            )
+            velocity.x = move_toward(
+                velocity.x,
+                0.0,
+                braking * delta
+            )
+            velocity.z = move_toward(
+                velocity.z,
+                0.0,
+                braking * delta
+            )
 
     if not is_on_floor():
         velocity.y -= 26.0 * delta
@@ -276,6 +306,7 @@ func _attack() -> void:
         held_target.set_held(false)
         var throw_mult: float = maxf(throw_force_multiplier, 0.5)
         held_target.take_hit(throw_dir * 17.0 * throw_mult + Vector3.UP * 6.2 * throw_mult, 38.0 * throw_mult)
+        _compose_camera_impact(held_target.global_position + Vector3.UP * 0.8, 0.92)
         held_target = null
         combo_step = 0
         combo_window = 0.0
@@ -297,6 +328,7 @@ func _attack() -> void:
         var lift: float = (1.1 if sprint_tackle else float([1.5, 2.0, 2.6][combo_step])) * minf(strength, 1.6)
         velocity += dir * (4.7 if sprint_tackle else (3.2 if combo_step == 2 else 1.7))
         target.take_hit(dir * push_strength + Vector3.UP * lift, damage)
+        _compose_camera_impact(target.global_position + Vector3.UP * 1.0, damage / 46.0)
         if sprint_tackle:
             traversal_lock = 0.18
             combo_step = 1
@@ -320,6 +352,7 @@ func _attack() -> void:
         var strength: float = maxf(melee_force_multiplier, 0.5)
         var prop_damage: float = (34.0 if attack_mode == 1 else 19.0) * strength
         prop.take_hit(prop_dir * (12.5 if attack_mode == 1 else 9.5) * strength + Vector3.UP * 1.9, prop_damage)
+        _compose_camera_impact(prop.global_position + Vector3.UP * 0.5, prop_damage / 42.0)
         velocity += prop_dir * 0.8
     combo_step = 0
     combo_window = 0.0
@@ -332,6 +365,7 @@ func _grab_or_throw() -> void:
         var throw_mult: float = maxf(throw_force_multiplier, 0.5)
         held_target.set_held(false)
         held_target.take_hit(dir * 13.5 * throw_mult + Vector3.UP * 5.2 * throw_mult, 24.0 * throw_mult)
+        _compose_camera_impact(held_target.global_position + Vector3.UP * 0.8, 0.78)
         held_target = null
         return
     var target = _find_grabbable(1.90)
@@ -416,6 +450,10 @@ func _find_target(radius: float):
             best_score = score
             best = enemy
     return best
+
+func _compose_camera_impact(world_position: Vector3, salience: float) -> void:
+    if camera_rig != null and camera_rig.has_method("compose_impact"):
+        camera_rig.compose_impact(world_position, clampf(salience, 0.0, 1.0))
 
 func _animate(delta: float) -> void:
     if _rig == null:

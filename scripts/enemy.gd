@@ -143,7 +143,11 @@ func _physics_process(delta: float) -> void:
         var move_dir := (dir + tangent * flank_weight + separation * 0.85).normalized()
         velocity.x = move_toward(velocity.x, move_dir.x * speed, 18.0 * delta)
         velocity.z = move_toward(velocity.z, move_dir.z * speed, 18.0 * delta)
-        rotation.y = lerp_angle(rotation.y, atan2(-dir.x, -dir.z), 0.16)
+        rotation.y = rotate_toward(
+            rotation.y,
+            atan2(-dir.x, -dir.z),
+            deg_to_rad(138.0) * delta
+        )
     else:
         velocity.x = move_toward(velocity.x, 0.0, 20.0 * delta)
         velocity.z = move_toward(velocity.z, 0.0, 20.0 * delta)

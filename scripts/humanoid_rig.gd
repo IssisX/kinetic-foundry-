@@ -19,6 +19,10 @@ var leg_l: Node3D
 var leg_r: Node3D
 var knee_l: Node3D
 var knee_r: Node3D
+var foot_l: Node3D
+var foot_r: Node3D
+var toe_l: Node3D
+var toe_r: Node3D
 
 func configure(is_player: bool) -> void:
     player_style = is_player
@@ -120,6 +124,10 @@ func _build() -> void:
     leg_r = _build_leg(pelvis, 1.0, cloth_dark, gear)
     knee_l = leg_l.get_node("Knee")
     knee_r = leg_r.get_node("Knee")
+    foot_l = knee_l.get_node("Foot")
+    foot_r = knee_r.get_node("Foot")
+    toe_l = foot_l.get_node("Toe")
+    toe_r = foot_r.get_node("Toe")
 
 func _build_arm(parent: Node3D, side: float, cloth: Color, gear: Color, skin: Color) -> Node3D:
     var shoulder := Node3D.new()
@@ -175,14 +183,14 @@ func _build_leg(parent: Node3D, side: float, cloth: Color, gear: Color) -> Node3
     hip.position = Vector3(side * 0.20, -0.08, 0.0)
     parent.add_child(hip)
 
-    var thigh := GeomUtil.capsule_mesh(0.155, 0.58, cloth)
-    thigh.position.y = -0.28
+    var thigh := GeomUtil.capsule_mesh(0.155, 0.46, cloth)
+    thigh.position.y = -0.22
     thigh.scale = Vector3(1.04, 1.0, 0.92)
     hip.add_child(thigh)
 
     var knee := Node3D.new()
     knee.name = "Knee"
-    knee.position.y = -0.56
+    knee.position.y = -0.44
     hip.add_child(knee)
 
     var knee_joint := GeomUtil.sphere_mesh(0.14, gear)
@@ -194,20 +202,42 @@ func _build_leg(parent: Node3D, side: float, cloth: Color, gear: Color) -> Node3
     knee_pad.position = Vector3(0.0, -0.01, -0.11)
     knee.add_child(knee_pad)
 
-    var shin := GeomUtil.capsule_mesh(0.125, 0.51, cloth)
-    shin.position.y = -0.255
+    var shin := GeomUtil.capsule_mesh(0.125, 0.42, cloth)
+    shin.position.y = -0.21
     shin.scale = Vector3(0.96, 1.0, 0.88)
     knee.add_child(shin)
 
-    var ankle := GeomUtil.cylinder_mesh(0.10, 0.11, gear, 0.94, 0.08)
-    ankle.position.y = -0.49
-    knee.add_child(ankle)
+    var foot := Node3D.new()
+    foot.name = "Foot"
+    foot.position.y = -0.44
+    knee.add_child(foot)
+
+    var ankle := GeomUtil.cylinder_mesh(
+        0.10,
+        0.11,
+        gear,
+        0.94,
+        0.08
+    )
+    ankle.position.y = 0.07
+    foot.add_child(ankle)
 
     var boot := GeomUtil.capsule_mesh(0.125, 0.44, Color(0.035, 0.042, 0.039))
     boot.rotation.x = PI * 0.5
     boot.scale = Vector3(1.08, 1.0, 0.78)
-    boot.position = Vector3(0.0, -0.57, -0.11)
-    knee.add_child(boot)
+    boot.position = Vector3(0.0, -0.01, -0.11)
+    foot.add_child(boot)
+
+    var toe := Node3D.new()
+    toe.name = "Toe"
+    toe.position = Vector3(0.0, -0.01, -0.30)
+    foot.add_child(toe)
+    var toe_cap := GeomUtil.sphere_mesh(
+        0.105,
+        Color(0.035, 0.042, 0.039)
+    )
+    toe_cap.scale = Vector3(1.08, 0.70, 1.30)
+    toe.add_child(toe_cap)
     return hip
 
 func animate(delta: float, planar_speed: float, reference_speed: float, attack_amount: float, hit_amount: float, dead: bool) -> void:
