@@ -1,11 +1,11 @@
 extends Node3D
 
 const PlayerScene = preload("res://scripts/player.gd")
-const EnemyScene = preload("res://scripts/enemy.gd")
-const ExcavatorScene = preload("res://scripts/excavator_contact.gd")
+const EnemyScene = preload("res://scripts/enemy_tactical.gd")
+const ExcavatorScene = preload("res://scripts/excavator_operator.gd")
 const StructureScene = preload("res://scripts/structure_material.gd")
 const CameraRigScene = preload("res://scripts/camera_rig.gd")
-const HudScene = preload("res://scripts/machine_hud.gd")
+const HudScene = preload("res://scripts/machine_hud_precision.gd")
 const YardScene = preload("res://scripts/industrial_yard.gd")
 const FacilityExpansionScene = preload("res://scripts/facility_expansion.gd")
 const HazardFieldScene = preload("res://scripts/hazard_field.gd")
