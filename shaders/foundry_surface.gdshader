@@ -28,6 +28,7 @@ uniform float impact_depth = 0.0;
 varying vec4 v_solver;
 varying float v_crater;
 varying float v_wave;
+varying float v_ao;
 
 void vertex() {
 	v_solver = COLOR;
@@ -43,6 +44,13 @@ void vertex() {
 	}
 	v_crater = crater;
 	VERTEX += NORMAL * (shimmer_m - crack_depth * d * d - impact_depth * crater + v_wave * 0.012);
+
+	vec3 world_n = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
+	vec3 world_p = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
+	float hemi = mix(0.55, 1.0, clamp(world_n.y * 0.5 + 0.5, 0.0, 1.0));
+	float height = mix(0.62, 1.0, smoothstep(0.02, 1.7, max(world_p.y, 0.0)));
+	float underside = mix(0.58, 1.0, clamp(world_n.y + 0.18, 0.0, 1.0));
+	v_ao = clamp(hemi * height * underside, 0.35, 1.0);
 }
 
 void fragment() {
@@ -82,4 +90,6 @@ void fragment() {
 		0.99
 	);
 	EMISSION = heat_color.rgb * (strain_glow + thermal_emission + wave_glow);
+	AO = v_ao;
+	AO_LIGHT_AFFECT = 0.22;
 }

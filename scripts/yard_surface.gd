@@ -11,7 +11,7 @@ func _ready() -> void:
 func _build_asphalt() -> void:
     var surface := GeomUtil.box_mesh(
         Vector3(51.0, 0.018, 55.0),
-        Color(0.145, 0.150, 0.145),
+        Color(0.18, 0.172, 0.158),
         0.97,
         0.02
     )

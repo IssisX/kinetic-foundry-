@@ -49,12 +49,16 @@ static func build(root: Node3D) -> Dictionary:
 
     _build_cab(root, nodes)
 
-    var work_light := OmniLight3D.new()
-    work_light.position = Vector3(-0.74, 3.52, -0.72)
-    work_light.light_color = Color(1.0, 0.72, 0.38)
-    work_light.light_energy = 1.8
-    work_light.omni_range = 7.5
-    root.add_child(work_light)
+    var work_light := GeomUtil.work_spot(
+        root,
+        Vector3(-0.74, 3.52, -0.72),
+        Vector3(-0.74, 1.10, -6.4),
+        Color(1.0, 0.78, 0.46),
+        7.2,
+        16.0,
+        36.0,
+        false
+    )
     nodes.work_light = work_light
 
     var beacon := GeomUtil.cylinder_mesh(0.12, 0.18, Color(0.98, 0.43, 0.05), 0.34, 0.05)

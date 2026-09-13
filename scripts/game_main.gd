@@ -66,45 +66,77 @@ func _build_environment() -> void:
     var world := WorldEnvironment.new()
     var env := Environment.new()
 
+    # Late-shift foundry air: dusty steel sky, warm horizon, no tropical blue.
+    # Ambient is a dim cool shade so the sun actually casts a shadow.
     var sky_mat := ProceduralSkyMaterial.new()
-    sky_mat.sky_top_color = Color(0.16, 0.48, 0.86)
-    sky_mat.sky_horizon_color = Color(0.66, 0.81, 0.96)
-    sky_mat.ground_bottom_color = Color(0.15, 0.17, 0.17)
-    sky_mat.ground_horizon_color = Color(0.46, 0.54, 0.58)
-    sky_mat.sun_angle_max = 12.0
-    sky_mat.sun_curve = 0.06
+    sky_mat.sky_top_color = Color(0.18, 0.26, 0.34)
+    sky_mat.sky_horizon_color = Color(0.70, 0.58, 0.42)
+    sky_mat.ground_bottom_color = Color(0.09, 0.09, 0.085)
+    sky_mat.ground_horizon_color = Color(0.32, 0.30, 0.26)
+    sky_mat.sky_curve = 0.11
+    sky_mat.sun_angle_max = 22.0
+    sky_mat.sun_curve = 0.07
     var sky := Sky.new()
     sky.sky_material = sky_mat
 
     env.background_mode = Environment.BG_SKY
     env.sky = sky
-    env.background_energy_multiplier = 1.08
-    env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-    env.ambient_light_color = Color(0.72, 0.80, 0.88)
-    env.ambient_light_energy = 0.88
+    env.background_energy_multiplier = 0.78
+    env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+    env.ambient_light_color = Color(0.36, 0.42, 0.48)
+    env.ambient_light_energy = 0.20
     env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
-    env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+    env.tonemap_mode = Environment.TONE_MAPPER_ACES
+    env.tonemap_exposure = 1.02
+    env.tonemap_white = 6.0
     env.fog_enabled = true
-    env.fog_light_color = Color(0.72, 0.80, 0.86)
-    env.fog_light_energy = 0.50
-    env.fog_density = 0.0015
+    env.fog_light_color = Color(0.58, 0.52, 0.42)
+    env.fog_light_energy = 0.32
+    env.fog_density = 0.0024
+    env.fog_aerial_perspective = 0.42
+    env.fog_sky_affect = 0.55
     env.fog_height = 0.0
-    env.fog_height_density = 0.018
+    env.fog_height_density = 0.026
+    env.glow_enabled = true
+    env.glow_intensity = 0.28
+    env.glow_strength = 0.72
+    env.glow_bloom = 0.035
+    env.glow_hdr_threshold = 1.15
+    env.adjustment_enabled = true
+    env.adjustment_contrast = 1.10
+    env.adjustment_saturation = 0.94
     world.environment = env
     add_child(world)
 
+    # Low sun: long machine-shaped shadows, not a noon puddle under the hull.
     var sun := DirectionalLight3D.new()
-    sun.rotation_degrees = Vector3(-54.0, -34.0, 0.0)
-    sun.light_color = Color(1.0, 0.94, 0.82)
-    sun.light_energy = 2.55
+    sun.rotation_degrees = Vector3(-28.0, -52.0, 0.0)
+    sun.light_color = Color(1.0, 0.86, 0.68)
+    sun.light_energy = 1.72
+    sun.light_specular = 0.82
+    sun.light_angular_distance = 0.42
     sun.shadow_enabled = true
-    sun.directional_shadow_max_distance = 125.0
+    sun.shadow_bias = 0.022
+    sun.shadow_normal_bias = 0.70
+    sun.shadow_blur = 0.55
+    sun.shadow_opacity = 1.0
+    sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_4_SPLITS
+    sun.directional_shadow_blend_splits = true
+    sun.directional_shadow_max_distance = 68.0
+    sun.directional_shadow_split_1 = 0.07
+    sun.directional_shadow_split_2 = 0.20
+    sun.directional_shadow_split_3 = 0.46
+    sun.directional_shadow_fade_start = 0.92
+    sun.directional_shadow_pancake_size = 10.0
     add_child(sun)
 
+    # Tiny sky bounce only. A second directional key was filling the shadows
+    # into the fake gray the captures were showing.
     var sky_fill := DirectionalLight3D.new()
-    sky_fill.rotation_degrees = Vector3(-32.0, 146.0, 0.0)
-    sky_fill.light_color = Color(0.54, 0.72, 0.96)
-    sky_fill.light_energy = 0.58
+    sky_fill.rotation_degrees = Vector3(-18.0, 128.0, 0.0)
+    sky_fill.light_color = Color(0.46, 0.58, 0.70)
+    sky_fill.light_energy = 0.09
+    sky_fill.light_specular = 0.0
     sky_fill.shadow_enabled = false
     add_child(sky_fill)
 

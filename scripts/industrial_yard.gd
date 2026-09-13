@@ -23,7 +23,7 @@ func _build_ground() -> void:
         "Ground",
         Vector3(0.0, -0.50, 0.0),
         Vector3(72.0, 1.0, 72.0),
-        Color(0.078, 0.084, 0.082)
+        Color(0.168, 0.160, 0.148)
     )
     for i in 9:
         var patch := GeomUtil.box_mesh(
@@ -102,8 +102,9 @@ func _build_warehouse() -> void:
         var bay_light := OmniLight3D.new()
         bay_light.position = Vector3(x, 5.3, -22.9)
         bay_light.light_color = Color(1.0, 0.66, 0.30)
-        bay_light.light_energy = 2.1
-        bay_light.omni_range = 7.0
+        bay_light.light_energy = 0.85
+        bay_light.omni_range = 6.2
+        bay_light.shadow_enabled = false
         add_child(bay_light)
 
     for window_i in 6:
@@ -420,11 +421,21 @@ func _spawn_box_prop(pos: Vector3, size: Vector3, color: Color, mass_value: floa
     prop.configure_box(size, color, mass_value, maxf(72.0, mass_value * 1.85))
 
 func _build_work_lights() -> void:
-    _yard_light(Vector3(-14.0, 7.3, 4.0), Color(1.0, 0.60, 0.25), 4.2, 17.0)
-    _yard_light(Vector3(3.0, 8.2, -7.0), Color(1.0, 0.69, 0.32), 4.7, 19.0)
-    _yard_light(Vector3(17.0, 7.0, 10.0), Color(0.50, 0.68, 0.75), 3.4, 14.0)
+    _yard_light(Vector3(-14.0, 7.3, 4.0), Color(1.0, 0.62, 0.28), 9.5, 22.0, true)
+    _yard_light(Vector3(3.0, 8.2, -7.0), Color(1.0, 0.70, 0.34), 11.0, 24.0, true)
+    _yard_light(Vector3(17.0, 7.0, 10.0), Color(0.62, 0.74, 0.82), 5.5, 16.0, false)
+    GeomUtil.work_spot(
+        self,
+        Vector3(0.0, 11.4, -23.2),
+        Vector3(2.0, 0.2, -4.0),
+        Color(1.0, 0.68, 0.36),
+        14.0,
+        34.0,
+        42.0,
+        true
+    )
 
-func _yard_light(pos: Vector3, color: Color, energy: float, range_value: float) -> void:
+func _yard_light(pos: Vector3, color: Color, energy: float, range_value: float, cast_shadow: bool = false) -> void:
     var pole := GeomUtil.cylinder_mesh(
         0.11,
         pos.y,
@@ -440,13 +451,8 @@ func _yard_light(pos: Vector3, color: Color, energy: float, range_value: float) 
         0.42,
         0.14
     )
-    head.material_override = GeomUtil.emissive_material(color * 0.75, 1.8, 0.35, 0.10)
+    head.material_override = GeomUtil.emissive_material(color * 0.75, 2.4, 0.35, 0.10)
     head.position = pos
     add_child(head)
-    var light := OmniLight3D.new()
-    light.position = pos + Vector3(0.0, -0.18, 0.0)
-    light.light_color = color
-    light.light_energy = energy
-    light.omni_range = range_value
-    light.shadow_enabled = false
-    add_child(light)
+    var aim := Vector3(pos.x * 0.28, 0.12, pos.z * 0.28)
+    GeomUtil.work_spot(self, pos + Vector3(0.0, -0.14, 0.0), aim, color, energy, range_value, 50.0, cast_shadow)

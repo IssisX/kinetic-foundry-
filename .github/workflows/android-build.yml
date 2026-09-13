@@ -102,6 +102,7 @@ jobs:
         with:
           tag_name: kinetic-foundry-build-${{ github.run_number }}
           name: Kinetic Foundry Build ${{ github.run_number }}
-          prerelease: true
+          prerelease: false
+          make_latest: true
           generate_release_notes: false
           files: build/android/KineticFoundry-debug.apk

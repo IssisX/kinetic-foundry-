@@ -10,6 +10,9 @@ static func material(
     mat.albedo_color = color
     mat.roughness = roughness
     mat.metallic = metallic
+    mat.shading_mode = BaseMaterial3D.SHADING_MODE_PER_PIXEL
+    mat.specular_mode = BaseMaterial3D.SPECULAR_SCHLICK_GGX
+    mat.disable_receive_shadows = false
     return mat
 
 static func emissive_material(
@@ -37,6 +40,40 @@ static func glass_material(
     mat.shading_mode = BaseMaterial3D.SHADING_MODE_PER_PIXEL
     mat.cull_mode = BaseMaterial3D.CULL_DISABLED
     return mat
+
+static func work_spot(
+        parent: Node,
+        pos: Vector3,
+        aim: Vector3,
+        color: Color,
+        energy: float,
+        range_value: float,
+        angle: float = 48.0,
+        cast_shadow: bool = false
+) -> SpotLight3D:
+    var light := SpotLight3D.new()
+    light.position = pos
+    light.light_color = color
+    light.light_energy = energy
+    light.light_specular = 0.35
+    light.spot_range = range_value
+    light.spot_angle = angle
+    light.spot_attenuation = 0.58
+    light.shadow_enabled = cast_shadow
+    light.shadow_bias = 0.04
+    light.shadow_normal_bias = 0.8
+    light.shadow_blur = 0.7
+    parent.add_child(light)
+    if parent is Node3D and aim.distance_to(pos) > 0.05:
+        var host := parent as Node3D
+        var world_aim: Vector3 = host.to_global(aim)
+        var dir: Vector3 = world_aim - light.global_position
+        if dir.length() > 0.05:
+            var up := Vector3.UP
+            if absf(dir.normalized().dot(up)) > 0.94:
+                up = Vector3.FORWARD
+            light.look_at(world_aim, up)
+    return light
 
 static func box_mesh(
         size: Vector3,

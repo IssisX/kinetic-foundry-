@@ -48,6 +48,7 @@ func _ready() -> void:
     _camera.fov = _third_person_fov
     _camera.keep_aspect = Camera3D.KEEP_WIDTH
     _camera.near = 0.075
+    _camera.far = 180.0
     add_child(_camera)
     _current_fov = _third_person_fov
 

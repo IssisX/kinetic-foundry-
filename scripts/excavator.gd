@@ -26,7 +26,7 @@ var _tool: Node3D
 var _thumb: Node3D
 var _grip_anchor: Node3D
 var _impact_probe: Area3D
-var _work_light: OmniLight3D
+var _work_light: Light3D
 var _engine_cover: MeshInstance3D
 var _arm_shapes: Array[CollisionShape3D] = []
 var _impact_cooldown := 0.0
