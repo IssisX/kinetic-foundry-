@@ -19,7 +19,7 @@ func _ready() -> void:
     set_process(true)
 
 func _process(delta: float) -> void:
-    var scene := get_tree().current_scene
+    var scene: Node = get_tree().current_scene
     if scene != null and scene.get_instance_id() != _scene_id:
         _scene_id = scene.get_instance_id()
         _scan_timer = 0.0
@@ -41,7 +41,7 @@ func _process(delta: float) -> void:
                 _attach_fragment_skins()
 
 func physical_event(event: Dictionary) -> void:
-    var kind := String(event.get("type", ""))
+    var kind: String = String(event.get("type", ""))
     if kind != "fracture" and kind != "collapse":
         return
     if not Fidelity.keep_skin_on_debris():
@@ -59,7 +59,7 @@ func _scan_for_surfaces(node: Node) -> void:
     for child in node.get_children():
         if child is DeformationSkin3D:
             if child.get_node_or_null("FidelitySurface") == null:
-                var overlay := SurfaceOverlay.new()
+                var overlay: Node = SurfaceOverlay.new()
                 child.add_child(overlay)
         _scan_for_surfaces(child)
 
@@ -141,16 +141,19 @@ func _match_and_attach(
             return
         var spec: Dictionary = spec_value as Dictionary
         var source_center: Vector3 = spec.get("local_position", Vector3.ZERO)
-        var mapped_center := _map_position(source_center, plane_mode)
+        var mapped_center: Vector3 = _map_position(source_center, plane_mode)
         var target_world: Vector3 = source_transform * mapped_center
-        var target_mass := maxf(float(spec.get("mass", 0.1)), 0.1)
-        var best = null
-        var best_score := INF
-        for candidate in candidates:
-            var distance := candidate.global_position.distance_to(target_world)
-            var candidate_mass := maxf(float(candidate.get("mass")), 0.1)
-            var mass_error := absf(candidate_mass - target_mass) / target_mass
-            var score := distance + mass_error * 0.65
+        var target_mass: float = maxf(float(spec.get("mass", 0.1)), 0.1)
+        var best: Node3D = null
+        var best_score: float = INF
+        for candidate_value in candidates:
+            var candidate: Node3D = candidate_value as Node3D
+            if candidate == null:
+                continue
+            var distance: float = candidate.global_position.distance_to(target_world)
+            var candidate_mass: float = maxf(float(candidate.get("mass")), 0.1)
+            var mass_error: float = absf(candidate_mass - target_mass) / target_mass
+            var score: float = distance + mass_error * 0.65
             if score < best_score:
                 best_score = score
                 best = candidate
@@ -158,20 +161,21 @@ func _match_and_attach(
         var size := Vector3.ONE
         if size_value is Vector3:
             size = size_value
-        var tolerance := maxf(1.0, size.length() * 0.52)
+        var tolerance: float = maxf(1.0, size.length() * 0.52)
         if best == null or best.global_position.distance_to(target_world) > tolerance:
             continue
-        var controller := FragmentSkin.new()
+        var controller: Node = FragmentSkin.new()
         controller.name = "FidelityFragmentSkin"
         best.add_child(controller)
-        if controller.configure(
+        if bool(controller.call(
+            "configure",
             best,
             network,
             spec,
             plane_mode,
             base_color,
             thickness
-        ):
+        )):
             candidates.erase(best)
         else:
             controller.queue_free()
