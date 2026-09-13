@@ -122,7 +122,8 @@ func _build_gate() -> void:
             205.0,
             true,
             0.24,
-            610.0
+            610.0,
+            1.0 if bool(FoundryMaterial.of(FoundryMaterial.PAINTED_STEEL).get("oxidises", true)) else 0.0
         )
         network.solver_iterations = Fidelity.iterations()
         panel_networks.append(network)
@@ -142,6 +143,21 @@ func _build_gate() -> void:
         beacon.light_energy = 1.4
         beacon.omni_range = 4.2
         post.add_child(beacon)
+
+## Optional seam for any fluid event that lands on a panel (see gate_panel.gd
+## and MaterialResponse._notify_wetness). Same world-to-network conversion
+## damage_panel_at uses, so a wet point on the mesh and a hit on the mesh
+## land on the same node.
+func deposit_wetness_at_panel(index: int, world_point: Vector3, amount: float) -> void:
+    if index < 0 or index >= panel_networks.size() or not is_instance_valid(panels[index]):
+        return
+    var panel := panels[index]
+    var local_point := panel.to_local(world_point)
+    local_point.x = clampf(local_point.x, -PANEL_SIZE * 0.5, PANEL_SIZE * 0.5)
+    local_point.y = clampf(local_point.y, -PANEL_SIZE * 0.5, PANEL_SIZE * 0.5)
+    var network: PrecisionFractureNetwork = panel_networks[index]
+    network.deposit_wetness(Vector3(local_point.x, 0.0, local_point.y), amount)
+
 
 func machine_hit(amount: float, direction: Vector3) -> void:
     if breached:

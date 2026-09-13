@@ -27,6 +27,19 @@ const WARM_START_RETENTION := 0.6
 const RESIDUAL_DECAY_PER_SECOND := 0.35
 const RESIDUAL_ENERGY_CEILING := 60000.0
 
+## Node-local moisture and oxidation. Wetness arrives at a point (a leak, a
+## splash) and both spreads and evaporates; oxidation follows wherever
+## wetness has lingered, spreading slower than the moisture that feeds it,
+## and only through bonds still active - a severed bond cannot wick rust
+## across the gap it just created. This is deliberately separate from
+## SurfaceState's own body-wide oxidation channel: that one is the slow
+## ambient bake every surface accrues; this one is the fast, spatially real
+## bloom that answers "where exactly did this get wet."
+const WETNESS_DIFFUSION_RATE := 1.2
+const WETNESS_EVAPORATION_PER_SECOND := 0.10
+const OXIDATION_DIFFUSION_RATE := 0.5
+const OXIDATION_GROWTH_RATE := 0.05
+
 var columns := 0
 var rows := 0
 var span := Vector3.ONE
@@ -48,6 +61,9 @@ var _forces: Array[Vector3] = []
 var _previous_positions: Array[Vector3] = []
 var _pinned: Array[bool] = []
 var _bonds: Array[Dictionary] = []
+var _wetness: Array[float] = []
+var _oxidation: Array[float] = []
+var oxidation_rate := 1.0
 var _node_mass := 1.0
 var _topology_dirty := true
 var _component_count := 1
@@ -75,8 +91,10 @@ func configure_grid(
         toughness: float,
         boundary_pins: bool = false,
         material_thickness: float = 0.24,
-        fracture_energy: float = 420.0
+        fracture_energy: float = 420.0,
+        oxidation_susceptibility: float = 1.0
 ) -> void:
+    oxidation_rate = clampf(oxidation_susceptibility, 0.0, 1.0)
     columns = maxi(2, grid_columns)
     rows = maxi(2, grid_rows)
     span = grid_span
@@ -104,6 +122,8 @@ func configure_grid(
     _previous_positions.clear()
     _pinned.clear()
     _bonds.clear()
+    _wetness.clear()
+    _oxidation.clear()
 
     var count := columns * rows
     _node_mass = total_mass / float(count)
@@ -126,6 +146,8 @@ func configure_grid(
             _forces.append(Vector3.ZERO)
             _previous_positions.append(position)
             _pinned.append(_is_pinned(column, row))
+            _wetness.append(0.0)
+            _oxidation.append(0.0)
 
     for row in rows:
         for column in columns:
@@ -219,6 +241,26 @@ func apply_force(local_point: Vector3, force: Vector3) -> void:
             1.0 / (0.20 + sqrt(float(entry.distance)))
         ) / weight_sum
         _forces[int(entry.index)] += force * weight
+
+
+## A fluid reaching this surface at a point, not everywhere at once. Feeds
+## the node-local wetness field that _step_oxidation spreads and dries; it
+## does not touch SurfaceState, which owns the body-wide paint/exposure
+## story. Radius defaults to a puddle-sized fraction of the whole span.
+func deposit_wetness(
+        local_point: Vector3,
+        amount: float,
+        radius: float = -1.0
+) -> void:
+    if _positions.is_empty() or amount <= 0.0:
+        return
+    var reach := radius if radius > 0.0 else maxf(span.length() * 0.16, 0.4)
+    for i in _positions.size():
+        var distance := _positions[i].distance_to(local_point)
+        if distance > reach:
+            continue
+        var weight := 1.0 - distance / reach
+        _wetness[i] = clampf(_wetness[i] + amount * weight, 0.0, 1.0)
 
 
 func apply_impact(
@@ -337,6 +379,74 @@ func step(delta: float) -> void:
         _step_substep(sub_delta)
     clear_forces()
     _refresh_topology()
+    _step_oxidation(safe_delta)
+
+
+## Moisture evaporates and spreads through active bonds; oxidation trails
+## behind it, slower, one-way, and gated by how susceptible this network's
+## material actually is. A dry, never-wetted network does none of this
+## work beyond the empty-check below.
+func _step_oxidation(delta: float) -> void:
+    if _wetness.is_empty() or delta <= 0.0:
+        return
+    var changed := false
+    for i in _wetness.size():
+        if _wetness[i] <= 0.0:
+            continue
+        var dried := _wetness[i] - WETNESS_EVAPORATION_PER_SECOND * delta
+        _wetness[i] = maxf(0.0, dried)
+        changed = true
+
+    if not _bonds.is_empty():
+        var wetness_flow: Array[float] = []
+        var oxidation_flow: Array[float] = []
+        wetness_flow.resize(_wetness.size())
+        oxidation_flow.resize(_oxidation.size())
+        for i in wetness_flow.size():
+            wetness_flow[i] = 0.0
+            oxidation_flow[i] = 0.0
+        for bond in _bonds:
+            if not bool(bond.active):
+                continue
+            var a := int(bond.a)
+            var b := int(bond.b)
+            var w_flow := (
+                (_wetness[b] - _wetness[a])
+                * WETNESS_DIFFUSION_RATE
+                * delta
+            )
+            wetness_flow[a] += w_flow
+            wetness_flow[b] -= w_flow
+            var o_flow := (
+                (_oxidation[b] - _oxidation[a])
+                * OXIDATION_DIFFUSION_RATE
+                * delta
+            )
+            oxidation_flow[a] += o_flow
+            oxidation_flow[b] -= o_flow
+        for i in wetness_flow.size():
+            if absf(wetness_flow[i]) > 0.00001:
+                _wetness[i] = clampf(_wetness[i] + wetness_flow[i], 0.0, 1.0)
+                changed = true
+            if absf(oxidation_flow[i]) > 0.00001:
+                _oxidation[i] = clampf(
+                    _oxidation[i] + oxidation_flow[i], 0.0, 1.0
+                )
+                changed = true
+
+    if oxidation_rate > 0.0:
+        for i in _oxidation.size():
+            if _oxidation[i] >= 1.0 or _wetness[i] <= 0.0:
+                continue
+            var gain := (
+                oxidation_rate * _wetness[i] * OXIDATION_GROWTH_RATE * delta
+            )
+            if gain > 0.0:
+                _oxidation[i] = minf(1.0, _oxidation[i] + gain)
+                changed = true
+
+    if changed:
+        _revision += 1
 
 
 func _step_substep(delta: float) -> void:
@@ -972,6 +1082,39 @@ func get_node_load(index: int) -> float:
     var force := impulse / maxf(_last_substep_delta, 0.0001)
     var ratio := force / maxf(_node_mass * 9.81, 0.001)
     return ratio / (1.0 + ratio)
+
+
+## Local rust bloom at this node, 0..1. Independent of SurfaceState's
+## body-wide oxidation scalar; the skin combines both.
+func get_node_oxidation(index: int) -> float:
+    if index < 0 or index >= _oxidation.size():
+        return 0.0
+    return _oxidation[index]
+
+
+func get_node_wetness(index: int) -> float:
+    if index < 0 or index >= _wetness.size():
+        return 0.0
+    return _wetness[index]
+
+
+## Grip multiplier at a point on this surface, from the same spatial field
+## that spreads visible rust: a puddle a player can see is a puddle they can
+## actually slip on, standing at that exact spot rather than anywhere on
+## the same body.
+func traction_at_point(local_point: Vector3) -> float:
+    if _positions.is_empty():
+        return 1.0
+    var nearest := _nearest_nodes(local_point, 1)
+    if nearest.is_empty():
+        return 1.0
+    var index := int(nearest[0].index)
+    var loss := clampf(
+        _wetness[index] * 0.55 + _oxidation[index] * 0.20,
+        0.0,
+        0.7
+    )
+    return 1.0 - loss
 
 
 func get_bond_visuals() -> Array[Dictionary]:

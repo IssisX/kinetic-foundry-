@@ -79,6 +79,7 @@ func _build_frame() -> void:
     deck.freeze = true
     deck.collision_layer = 8
     deck.collision_mask = 1 | 2 | 4 | 8
+    deck.set_meta("structure_frame", self)
     add_child(deck)
     deck.add_child(GeomUtil.box_mesh(Vector3(9.4, 0.48, 6.0), Color(0.18, 0.19, 0.175), 0.90, 0.24))
     GeomUtil.add_box_collision(deck, Vector3(9.4, 0.48, 6.0))
@@ -92,7 +93,8 @@ func _build_frame() -> void:
         DECK_TOUGHNESS,
         false,
         DECK_THICKNESS,
-        DECK_FRACTURE_ENERGY
+        DECK_FRACTURE_ENERGY,
+        _oxidation_rate()
     )
     deck_network.solver_iterations = Fidelity.iterations()
     deck_skin = DeformationSkin.new()
@@ -182,6 +184,37 @@ func _make_support(index: int, pos: Vector3) -> StaticBody3D:
         plate.position.y = float(plate_y)
         support.add_child(plate)
     return support
+
+## Whether this steel rusts at all is FoundryMaterial's call, not this
+## file's: read from the same catalog entry the deck is registered under.
+func _oxidation_rate() -> float:
+    return (
+        1.0
+        if bool(FoundryMaterial.of(FoundryMaterial.STRUCTURAL_STEEL).get("oxidises", true))
+        else 0.0
+    )
+
+
+## Optional hook a fluid event can call on anything it lands on (see
+## MaterialResponse.fluid_leak). world_point becomes the deck's own local
+## contact point, so the rust this seeds actually spreads from where the
+## deck really got wet, not from an arbitrary origin.
+func deposit_wetness_at(world_point: Vector3, amount: float) -> void:
+    if deck_network == null or deck == null:
+        return
+    var local_point := deck.to_local(world_point)
+    deck_network.deposit_wetness(Vector3(local_point.x, 0.0, local_point.z), amount)
+
+
+## What MaterialResponse.traction_at reads to find out whether the exact
+## spot a body is standing on is wet, rather than only whether the deck as
+## a whole has any oil or water on it anywhere.
+func get_local_traction_at(world_point: Vector3) -> float:
+    if deck_network == null or deck == null:
+        return 1.0
+    var local_point := deck.to_local(world_point)
+    return deck_network.traction_at_point(Vector3(local_point.x, 0.0, local_point.z))
+
 
 func damage_support(
         index: int,
@@ -280,7 +313,8 @@ func _on_fidelity_rebuild_requested(_f: int) -> void:
         DECK_TOUGHNESS,
         false,
         DECK_THICKNESS,
-        DECK_FRACTURE_ENERGY
+        DECK_FRACTURE_ENERGY,
+        _oxidation_rate()
     )
     deck_network.solver_iterations = Fidelity.iterations()
     for i in support_health.size():

@@ -238,7 +238,7 @@ func _ground_traction() -> float:
     var collider := collision.get_collider()
     if collider == null:
         return 1.0
-    return MaterialResponse.traction_at(collider)
+    return MaterialResponse.traction_at(collider, collision.get_position())
 
 
 func take_hit(force: Vector3, damage: float) -> void:

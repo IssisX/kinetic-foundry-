@@ -3,7 +3,9 @@ render_mode cull_disabled, depth_draw_opaque, specular_schlick_ggx;
 
 // Every field below is produced by a solver or by surface history.
 // COLOR.r = node damage D, COLOR.g = tensile strain heat, COLOR.b = |lambda|
-// as a fraction of node weight. The uniforms are the body-wide surface state.
+// as a fraction of node weight, COLOR.a = local oxidation bloom (spreads
+// through the bond graph from wherever the surface actually got wet). The
+// uniforms are the body-wide surface state.
 
 uniform vec4 base_color : source_color = vec4(0.31, 0.32, 0.30, 1.0);
 uniform vec4 substrate_color : source_color = vec4(0.34, 0.35, 0.33, 1.0);
@@ -34,6 +36,11 @@ void fragment() {
 	float d = clamp(v_solver.r, 0.0, 1.0);
 	float heat = clamp(v_solver.g, 0.0, 1.0);
 	float load = clamp(v_solver.b, 0.0, 1.0);
+	float local_rust = clamp(v_solver.a, 0.0, 1.0);
+	// The ambient, body-wide bake and the fast local bloom answer different
+	// questions (how old is this plate vs. where exactly did it get wet) and
+	// add rather than replace each other.
+	float rust = clamp(oxidation_level + local_rust, 0.0, 1.0);
 
 	// Working steel goes bare, then dark oxide. Only the narrow band right
 	// at a failing bond reads as an actual opening.
@@ -42,7 +49,7 @@ void fragment() {
 	albedo = mix(
 		albedo,
 		oxide_color.rgb,
-		clamp(oxidation_level + smoothstep(0.20, 0.80, d) * 0.85, 0.0, 1.0)
+		clamp(rust + smoothstep(0.20, 0.80, d) * 0.85, 0.0, 1.0)
 	);
 	albedo = mix(albedo, crack_color.rgb, smoothstep(0.86, 1.0, d));
 	albedo = mix(albedo, film_color.rgb, film_amount * 0.78);
@@ -53,12 +60,12 @@ void fragment() {
 
 	ALBEDO = albedo;
 	METALLIC = clamp(
-		mix(metallic_base, 0.52, exposure_level) * (1.0 - 0.74 * oxidation_level),
+		mix(metallic_base, 0.52, exposure_level) * (1.0 - 0.74 * rust),
 		0.0,
 		1.0
 	);
 	ROUGHNESS = clamp(
-		roughness_base + d * 0.22 + oxidation_level * 0.18 - load * 0.05 - film_gloss * 0.55,
+		roughness_base + d * 0.22 + rust * 0.18 - load * 0.05 - film_gloss * 0.55,
 		0.05,
 		0.99
 	);

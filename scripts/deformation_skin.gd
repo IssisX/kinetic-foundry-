@@ -155,7 +155,7 @@ func _rebuild_surface() -> void:
                 clampf(network.get_node_damage(index), 0.0, 1.0),
                 clampf(network.get_node_heat(index), 0.0, 1.0),
                 clampf(network.get_node_load(index), 0.0, 1.0),
-                1.0
+                clampf(network.get_node_oxidation(index), 0.0, 1.0)
             ))
             uvs.append(Vector2(
                 float(column) / float(grid.x - 1),

@@ -2,6 +2,15 @@ extends StaticBody3D
 
 var gate_owner
 
+func deposit_wetness_at(world_point: Vector3, amount: float) -> void:
+    if gate_owner == null or not gate_owner.has_method("deposit_wetness_at_panel"):
+        return
+    gate_owner.deposit_wetness_at_panel(
+        int(get_meta("gate_index", -1)),
+        world_point,
+        amount
+    )
+
 func machine_hit(amount: float, direction: Vector3) -> void:
     var world_point := _infer_machine_contact_point()
     machine_hit_at(

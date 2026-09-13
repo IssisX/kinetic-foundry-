@@ -301,16 +301,19 @@ func fluid_leak(
     var source_state := state_for(source, material_of(source))
     if source_state != null:
         source_state.deposit_fluid(fluid_id, amount * 0.45)
+    _notify_wetness(source, world_point, amount * 0.45)
 
     var landed := _raycast_down(world_point, float(options.get("reach", 6.0)))
     if not landed.is_empty():
         var floor_body: Object = landed.get("collider")
+        var floor_point: Vector3 = landed.get("position", world_point)
         var floor_state := state_for(
             floor_body,
             int(options.get("floor_material", FoundryMaterial.ASPHALT))
         )
         if floor_state != null:
             floor_state.deposit_fluid(fluid_id, amount)
+        _notify_wetness(floor_body, floor_point, amount)
 
     if _live_fx < LIVE_FX_BUDGET:
         _live_fx += 1
@@ -332,6 +335,31 @@ func fluid_leak(
         {"sparks": 0, "dust": 0, "splinters": 0},
         {"material": fluid_id, "radius": 3.2}
     )
+
+
+## Optional seam into a body's own spatial wetness field (a FractureNetwork
+## node array), for whichever bodies have one. The collider a raycast hits
+## is not always the object that owns the network (a plain RigidBody3D like
+## the deck has no script of its own), so this also checks a
+## "structure_frame" meta pointing back at the actual owner.
+func _notify_wetness(target: Object, world_point: Vector3, amount: float) -> void:
+    if target == null or amount <= 0.0:
+        return
+    var receiver := _structure_owner(target)
+    if receiver != null and receiver.has_method("deposit_wetness_at"):
+        receiver.deposit_wetness_at(world_point, amount)
+
+
+## A raycast or a CharacterBody3D collision hits whatever collider is there,
+## which for a plain RigidBody3D/StaticBody3D (the deck, a gate panel body)
+## is not the scripted object that actually owns its FractureNetwork. A
+## "structure_frame" meta redirects to the real owner where one is set.
+func _structure_owner(target: Object) -> Object:
+    if target == null:
+        return null
+    if target.has_meta("structure_frame"):
+        return target.get_meta("structure_frame")
+    return target
 
 
 ## Films redistribute when two surfaces rub. Nothing else crosses.
@@ -362,15 +390,27 @@ func adopt_fragment(
     return inherited
 
 
-func traction_at(target: Object) -> float:
+## Bulk grip cost from the body's whole-surface film state, floored against
+## whatever the exact contact point's local wetness field says (see
+## StructuralFrame.get_local_traction_at) - whichever is more slippery wins,
+## since grip is limited by the worse of the two readings, not their sum.
+func traction_at(target: Object, world_point: Vector3) -> float:
+    var bulk := 1.0
     var entry: Dictionary = _surfaces.get(
         target.get_instance_id() if target != null else 0,
         {}
     )
-    if entry.is_empty():
+    if not entry.is_empty():
+        var state: SurfaceState = entry.get("state")
+        bulk = state.traction_scale()
+    return minf(bulk, _local_traction(target, world_point))
+
+
+func _local_traction(target: Object, world_point: Vector3) -> float:
+    var receiver := _structure_owner(target)
+    if receiver == null or not receiver.has_method("get_local_traction_at"):
         return 1.0
-    var state: SurfaceState = entry.get("state")
-    return state.traction_scale()
+    return float(receiver.get_local_traction_at(world_point))
 
 
 ## What this substrate currently costs, for the performance bill.
