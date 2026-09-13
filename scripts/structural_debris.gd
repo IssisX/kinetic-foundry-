@@ -2,9 +2,9 @@ class_name StructuralDebris
 extends RigidBody3D
 
 const GeomUtil = preload("res://scripts/geom.gd")
-const MaterialFx = preload("res://scripts/material_fx.gd")
 
 var held := false
+var surface_state: SurfaceState
 var source_tag := "structure"
 var piece_size := Vector3.ONE
 var toughness := 180.0
@@ -45,6 +45,7 @@ func configure(
     set_meta("load_size", size)
     set_meta("source_tag", tag)
     _build_segmented_body()
+    _ensure_surface_state()
 
 
 func configure_fragment(
@@ -156,6 +157,7 @@ func configure_fragment(
     material.cull_mode = BaseMaterial3D.CULL_DISABLED
     mesh.material_override = material
     add_child(mesh)
+    _ensure_surface_state()
 
     var points := PackedVector3Array()
     for point in hull:
@@ -347,21 +349,6 @@ func _receive_energy(
             * minf(impulse * 0.30, mass * 8.0)
         )
 
-    if source_tag.contains("concrete"):
-        MaterialFx.concrete(
-            get_parent(),
-            world_point,
-            direction,
-            clampf(damage / 22.0 + energy_ratio, 0.5, 4.4)
-        )
-    else:
-        MaterialFx.steel(
-            get_parent(),
-            world_point,
-            direction,
-            clampf(damage / 24.0 + energy_ratio, 0.5, 4.6)
-        )
-
     _emit_physical_event(
         world_point,
         impulse,
@@ -369,6 +356,7 @@ func _receive_energy(
         plastic_strain - plastic_before,
         impact_energy
     )
+    _apply_surface_state()
 
     var longest := _axis_value(piece_size, _axis_index)
     var fracture_threshold := mass * 58.0
@@ -536,6 +524,13 @@ func _fracture_at(
             maxf(35.0, toughness * 0.72 + 55.0),
             source_tag
         )
+        child.bind_surface_state(
+            MaterialResponse.adopt_fragment(
+                child,
+                surface_state,
+                clampf(lengths[i] / maxf(longest, 0.001), 0.0, 1.0) * 0.6
+            )
+        )
         var side := -1.0 if i == 0 else 1.0
         child.linear_velocity = (
             linear_velocity
@@ -548,25 +543,23 @@ func _fracture_at(
             * energy_ratio
         )
 
-    get_tree().call_group(
-        "physical_event_listener",
-        "physical_event",
+    MaterialResponse.fracture(
+        self,
+        world_point,
+        direction,
+        impact_energy,
+        mass,
         {
-            "type": "fracture",
-            "position": world_point,
-            "impulse": sqrt(maxf(2.0 * mass * impact_energy, 0.0)),
-            "mass": mass,
-            "fracture": 1.0,
+            "material": material_identity(),
             "radius": maxf(1.0, longest * 0.55),
-            "novelty": 0.94,
-            "material": _material_tag()
+            "novelty": 0.94
         }
     )
     queue_free()
 
 func _emit_physical_event(
         world_point: Vector3,
-        impulse: float,
+        _impulse: float,
         damage: float,
         plastic_delta: float,
         impact_energy: float
@@ -577,17 +570,18 @@ func _emit_physical_event(
         piece_size.x,
         maxf(piece_size.y, piece_size.z)
     )
-    get_tree().call_group(
-        "physical_event_listener",
-        "physical_event",
+    MaterialResponse.impact(
+        self,
+        world_point,
+        direction_from_impulse(world_point),
+        impact_energy,
+        mass,
+        FoundryMaterial.HARDENED_STEEL,
         {
             "type": "debris_impact",
-            "position": world_point,
-            "impulse": maxf(
-                impulse,
-                sqrt(maxf(2.0 * mass * impact_energy, 0.0)) * 0.12
-            ),
-            "mass": mass,
+            "material": material_identity(),
+            "radius": extent,
+            "area": clampf(extent * 0.18, 0.01, 1.2),
             "fracture": clampf(
                 plastic_delta * 8.0
                 + damage / 180.0
@@ -595,11 +589,16 @@ func _emit_physical_event(
                 0.0,
                 1.0
             ),
-            "radius": extent,
-            "novelty": clampf(0.55 + damage / 120.0, 0.55, 1.0),
-            "material": _material_tag()
+            "novelty": clampf(0.55 + damage / 120.0, 0.55, 1.0)
         }
     )
+
+
+func direction_from_impulse(world_point: Vector3) -> Vector3:
+    var away := world_point - global_position
+    if away.length_squared() < 0.0001:
+        return Vector3.UP
+    return away.normalized()
 
 func get_load_profile() -> Dictionary:
     var velocity_sq := linear_velocity.length_squared()
@@ -698,3 +697,40 @@ func _set_axis_value(value: Vector3, axis: int, amount: float) -> Vector3:
 
 func _material_tag() -> String:
     return "concrete" if source_tag.contains("concrete") else "steel"
+
+
+func material_identity() -> int:
+    if surface_state != null:
+        return surface_state.material_id
+    return FoundryMaterial.id_from_legacy(_material_tag())
+
+
+func _ensure_surface_state() -> void:
+    if surface_state != null:
+        return
+    bind_surface_state(
+        MaterialResponse.register(
+            self,
+            FoundryMaterial.id_from_legacy(_material_tag()),
+            _base_color
+        )
+    )
+
+
+## A piece arrives already carrying what happened to the thing it came off.
+func bind_surface_state(state) -> void:
+    surface_state = state as SurfaceState
+    _apply_surface_state()
+
+
+func _apply_surface_state() -> void:
+    if surface_state == null:
+        return
+    for child in get_children():
+        var mesh := child as MeshInstance3D
+        if mesh == null:
+            continue
+        var surface := mesh.material_override as StandardMaterial3D
+        if surface == null:
+            continue
+        surface_state.apply_to_material(surface)

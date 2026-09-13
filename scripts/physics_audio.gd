@@ -36,10 +36,14 @@ func physical_event(event: Dictionary) -> void:
     var mass := maxf(float(event.get("mass", 1.0)), 1.0)
     var fracture := clampf(float(event.get("fracture", 0.0)), 0.0, 1.0)
     var radius := maxf(float(event.get("radius", 1.0)), 0.5)
-    var material := str(event.get("material", "steel"))
+    var material_id := int(event.get(
+        "material_id",
+        FoundryMaterial.id_from_legacy(str(event.get("material", "steel")))
+    ))
+    var acoustic := maxf(float(event.get("acoustic_energy", 0.0)), 0.0)
 
     var importance := clampf(
-        log(1.0 + impulse * 0.025) / 4.2
+        log(1.0 + acoustic * 1.25 + impulse * 0.004) / 4.2
         + fracture * 0.34
         + clampf(mass / 1800.0, 0.0, 0.25),
         0.0,
@@ -62,7 +66,7 @@ func physical_event(event: Dictionary) -> void:
     var duration := _duration_for(event_type, mass, fracture)
     var wav := _synthesize(
         event_type,
-        material,
+        material_id,
         impulse,
         mass,
         fracture,
@@ -219,7 +223,7 @@ func _duration_for(event_type: String, mass: float, fracture: float) -> float:
 
 func _synthesize(
         event_type: String,
-        material: String,
+        material_id: int,
         impulse: float,
         mass: float,
         fracture: float,
@@ -242,8 +246,11 @@ func _synthesize(
     )
     rng.seed = seed_value
 
-    var material_kind := material.to_lower()
-    var base_frequency := _base_frequency(material_kind, mass, event_type)
+    var data := FoundryMaterial.of(material_id)
+    var base_frequency := _base_frequency(material_id, mass, event_type)
+    var ring_gain := float(data.get("ring_gain", 0.7))
+    var grit_gain := float(data.get("grit_gain", 0.25))
+    var decay_rate := float(data.get("decay", 3.1))
     var energy := clampf(log(1.0 + impulse * 0.020) / 4.0, 0.06, 1.0)
     var low_mix := clampf(mass / 1200.0, 0.0, 1.0)
 
@@ -251,7 +258,7 @@ func _synthesize(
         var t := float(i) / float(MIX_RATE)
         var u := t / maxf(duration, 0.001)
         var transient := exp(-t * lerpf(34.0, 11.0, low_mix))
-        var body_decay := exp(-t * lerpf(8.5, 2.8, low_mix))
+        var body_decay := exp(-t * decay_rate * lerpf(1.75, 0.62, low_mix))
         var tail := pow(maxf(0.0, 1.0 - u), 1.35)
         var noise := rng.randf_range(-1.0, 1.0)
         var sample := 0.0
@@ -268,11 +275,6 @@ func _synthesize(
             )
             var crunch := noise * (0.38 + fracture * 0.45) * exp(-t * 2.9)
             sample = rumble * body_decay * 0.48 + crunch
-        elif material_kind.contains("concrete"):
-            var thud := sin(TAU * base_frequency * t) * body_decay
-            var grit := noise * transient * (0.42 + fracture * 0.50)
-            var crack := sin(TAU * base_frequency * 3.7 * t) * transient * fracture
-            sample = thud * 0.52 + grit * 0.55 + crack * 0.18
         else:
             var mode_a := sin(TAU * base_frequency * t)
             var mode_b := sin(TAU * base_frequency * 2.41 * t + 0.33)
@@ -281,9 +283,15 @@ func _synthesize(
                 mode_a * 0.56
                 + mode_b * 0.25
                 + mode_c * 0.12
-            ) * body_decay
-            var scrape := noise * transient * (0.16 + fracture * 0.34)
-            sample = ring + scrape
+            ) * body_decay * ring_gain
+            var grit := noise * transient * grit_gain * (0.34 + fracture * 0.52)
+            var crack := (
+                sin(TAU * base_frequency * 3.7 * t)
+                * transient
+                * fracture
+                * grit_gain
+            )
+            sample = ring + grit + crack * 0.22
 
         sample *= energy * tail
         sample = tanh(sample * 1.45) * 0.86
@@ -298,23 +306,18 @@ func _synthesize(
     wav.data = bytes
     return wav
 
-func _base_frequency(material: String, mass: float, event_type: String) -> float:
+func _base_frequency(material_id: int, mass: float, event_type: String) -> float:
     if event_type == "collapse":
         return clampf(
             68.0 / pow(maxf(mass / 650.0, 0.25), 0.18),
             34.0,
             74.0
         )
-    if material.contains("concrete"):
-        return clampf(
-            132.0 / pow(maxf(mass / 120.0, 0.22), 0.22),
-            72.0,
-            178.0
-        )
-    var steel_frequency := (
-        285.0 / pow(maxf(mass / 80.0, 0.25), 0.24)
-    )
-    return clampf(steel_frequency, 82.0, 410.0)
+    var data := FoundryMaterial.of(material_id)
+    var reference := float(data.get("ring_hz", 285.0))
+    var exponent := float(data.get("mass_exponent", 0.24))
+    var frequency := reference / pow(maxf(mass / 80.0, 0.22), exponent)
+    return clampf(frequency, reference * 0.28, reference * 1.45)
 
 func _prune_voices() -> void:
     var valid: Array[AudioStreamPlayer3D] = []

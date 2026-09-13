@@ -1,7 +1,5 @@
 extends "res://scripts/excavator.gd"
 
-const MaterialFx = preload("res://scripts/material_fx.gd")
-
 const MACHINE_EFFECTIVE_MASS := 2600.0
 const TRACK_HALF_WIDTH := 1.48
 const TRACK_HALF_LENGTH := 2.20
@@ -19,7 +17,6 @@ var _stability_longitudinal := 0.0
 var _tip_direction_local := Vector3.ZERO
 var _stability_damage_bank := 0.0
 var _stability_notice_cooldown := 0.0
-var _physical_event_cooldown := 0.0
 
 func get_operator_view_anchor() -> Node3D:
     var anchor := get_node_or_null("OperatorView") as Node3D
@@ -48,10 +45,6 @@ func _physics_process(delta: float) -> void:
     _stability_notice_cooldown = maxf(
         0.0,
         _stability_notice_cooldown - delta
-    )
-    _physical_event_cooldown = maxf(
-        0.0,
-        _physical_event_cooldown - delta
     )
     _update_stability(delta)
     super(delta)
@@ -361,13 +354,20 @@ func _apply_machine_damage(amount: float, direction: Vector3) -> void:
     )
 
     if amount >= 10.0:
-        MaterialFx.steel(
-            get_parent(),
+        MaterialResponse.impact(
+            self,
             global_position
             + Vector3.UP * 1.55
             + direction.normalized() * 0.6,
             direction,
-            clampf(amount / 18.0, 0.6, 4.0)
+            EnergyPartition.nominal_impact_energy(amount),
+            MACHINE_EFFECTIVE_MASS,
+            FoundryMaterial.HARDENED_STEEL,
+            {
+                "material": FoundryMaterial.PAINTED_STEEL,
+                "area": 0.22,
+                "radius": 4.2
+            }
         )
 
     if (
@@ -375,18 +375,17 @@ func _apply_machine_damage(amount: float, direction: Vector3) -> void:
         and hydraulic_health < 190.0
         and _hydraulic_fx_budget <= 0.0
     ):
-        var rupture_strength := clampf(
-            (260.0 - hydraulic_health) / 62.0,
-            0.8,
-            4.5
-        )
-        MaterialFx.hydraulic(
-            get_parent(),
+        # A failed seal is a fluid source. What the oil reaches keeps it,
+        # and the tracks carry it around the yard from there.
+        MaterialResponse.fluid_leak(
+            self,
             _boom.to_global(Vector3(0.40, 0.18, -1.6))
             if _boom != null
             else global_position + Vector3.UP * 2.4,
             direction + Vector3.UP * 0.55,
-            rupture_strength
+            FoundryMaterial.HYDRAULIC_FLUID,
+            clampf(hydraulic_loss / 24.0, 0.05, 0.85),
+            {"reach": 7.0, "floor_material": FoundryMaterial.ASPHALT}
         )
         _hydraulic_fx_budget = lerpf(
             1.1,
@@ -429,44 +428,46 @@ func _collect_hard_arm_contacts() -> Array[Node]:
                 contacts.append(collider)
     return contacts
 
+## A bucket held against steel and dragged is doing friction work on a real
+## trajectory. That work is what marks the plate, heats it and throws sparks;
+## none of those are separately authored here.
 func _react_to_arm_contacts(contacts: Array[Node]) -> void:
     super(contacts)
-    if _physical_event_cooldown > 0.0 or contacts.is_empty():
+    if contacts.is_empty() or _tool_tip_speed < 0.35:
         return
-    var force := get_tool_force()
-    if force < 42.0 and _tool_tip_speed < 1.5:
+    var normal_force := get_tool_force() * FORCE_TO_NEWTONS
+    if normal_force < 400.0:
         return
     var held_mass := 0.0
     if is_holding_load():
         held_mass = float(held_load.get("mass"))
-    var event_impulse := (
-        force
-        * (1.0 + minf(_tool_tip_speed, 10.0) * 0.38)
-        * (1.0 + held_mass / 520.0)
+    var direction := -_tool.global_basis.z
+    if _tool_tip_velocity.length_squared() > 0.04:
+        direction = _tool_tip_velocity.normalized()
+    var tool_state := MaterialResponse.state_for(
+        self,
+        FoundryMaterial.PAINTED_STEEL
     )
-    get_tree().call_group(
-        "physical_event_listener",
-        "physical_event",
-        {
-            "type": "machine_contact",
-            "position": _tool.global_position,
-            "impulse": event_impulse,
-            "mass": MACHINE_EFFECTIVE_MASS + held_mass,
-            "fracture": clampf(
-                _load_path_resistance * 0.35
-                + _actuator_effort * 0.22,
-                0.0,
-                1.0
-            ),
-            "radius": 5.5,
-            "novelty": clampf(
-                0.58 + _contact_age * 0.18,
-                0.58,
-                1.0
-            )
-        }
-    )
-    _physical_event_cooldown = 0.20
+    var step := get_physics_process_delta_time()
+    for collider in contacts:
+        if not is_instance_valid(collider):
+            continue
+        MaterialResponse.scrape(
+            collider,
+            _tool.global_position,
+            direction,
+            normal_force,
+            _tool_tip_speed,
+            step,
+            FoundryMaterial.HARDENED_STEEL,
+            {
+                "mass": MACHINE_EFFECTIVE_MASS + held_mass,
+                "area": 0.12,
+                "radius": 5.5,
+                "tool_state": tool_state,
+                "novelty": clampf(0.58 + _contact_age * 0.18, 0.58, 1.0)
+            }
+        )
 
 func _resolve_arm_contact_pose() -> void:
     var target_boom := boom_angle
@@ -560,6 +561,19 @@ func _push_dynamic_arm_contacts() -> void:
                     collision.global_position
                 )
             else:
+                MaterialResponse.impact(
+                    body,
+                    collision.global_position,
+                    direction,
+                    EnergyPartition.collision_energy(
+                        ARM_EFFECTIVE_MASS,
+                        body.mass,
+                        speed
+                    ),
+                    body.mass,
+                    FoundryMaterial.HARDENED_STEEL,
+                    {"area": 0.10, "radius": 3.0}
+                )
                 var impulse_mag: float = minf(
                     (8.0 + speed * 7.5) * body.mass,
                     2400.0
@@ -580,12 +594,6 @@ func _push_dynamic_arm_contacts() -> void:
                 )
 
     if not affected.is_empty():
-        MaterialFx.steel(
-            get_parent(),
-            _tool.global_position,
-            direction,
-            clampf(force / 42.0, 0.7, 3.6)
-        )
         if (
             player_driver != null
             and camera_rig != null

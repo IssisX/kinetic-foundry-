@@ -1,6 +1,5 @@
 extends "res://scripts/structure.gd"
 
-const MaterialFx = preload("res://scripts/material_fx.gd")
 const GeomUtilLocal = preload("res://scripts/geom.gd")
 const StructuralDebrisLocal = preload(
     "res://scripts/structural_debris.gd"
@@ -81,7 +80,7 @@ func damage_support(
             )
     var impact_energy := source_energy
     if impact_energy < 0.0:
-        impact_energy = amount * amount * 3.0
+        impact_energy = EnergyPartition.nominal_impact_energy(amount)
     damage_support_at(
         index,
         amount,
@@ -128,38 +127,39 @@ func damage_support_at(
         impact_energy
     )
 
-    MaterialFx.steel(
-        get_parent(),
+    MaterialResponse.impact(
+        supports[index],
         world_point,
         direction,
-        clampf(maxf(removed / 20.0, impact_energy / 6000.0), 0.55, 5.2)
-    )
-
-    get_tree().call_group(
-        "physical_event_listener",
-        "physical_event",
+        impact_energy,
+        180.0,
+        FoundryMaterial.HARDENED_STEEL,
         {
-            "type": "machine_contact",
-            "position": world_point,
-            "impulse": sqrt(maxf(2.0 * 180.0 * impact_energy, 0.0)),
-            "mass": 180.0,
+            "type": MaterialResponse.EVENT_MACHINE,
+            "radius": 2.3,
+            "area": 0.09,
             "fracture": clampf(
                 removed / 95.0 + impact_energy / 22000.0,
                 0.0,
                 1.0
             ),
-            "radius": 2.3,
-            "novelty": clampf(0.55 + removed / 120.0, 0.55, 1.0),
-            "material": "steel"
+            "novelty": clampf(0.55 + removed / 120.0, 0.55, 1.0)
         }
     )
 
+    # The column is standing on something. A hit hard enough to shift it
+    # spalls the pad underneath, and the pad decides what that looks like.
     if removed > 28.0 or support_health[index] <= 0.0:
-        MaterialFx.concrete(
-            get_parent(),
-            world_point - Vector3.UP * minf(world_point.y, 2.8),
+        MaterialResponse.impact_below(
+            world_point,
             direction + Vector3.UP * 0.35,
-            clampf(removed / 24.0, 0.8, 4.2)
+            impact_energy * 0.34,
+            180.0,
+            {
+                "reach": minf(world_point.y, 3.2) + 0.8,
+                "tool_material": FoundryMaterial.STRUCTURAL_STEEL,
+                "radius": 3.4
+            }
         )
 
 func _deform_support_at(
@@ -243,22 +243,44 @@ func _deform_support_at(
             1.0 - local_damage * 0.19,
             1.0 + local_damage * 0.10
         )
-        var heat := clampf(
-            (1.0 - support_health[index] / 100.0) * 0.55
-            + local_damage * 0.55,
-            0.0,
-            1.0
-        )
-        segment.material_override = GeomUtilLocal.material(
-            Color(0.39, 0.33, 0.20).lerp(
-                Color(0.57, 0.18, 0.055),
-                heat
-            ),
-            0.84,
-            0.30
-        )
+        _shade_segment(segment, index, local_damage)
 
     _support_segment_damage[index] = damage_list
+
+
+## The body owns what the column is made of and what has happened to it.
+## The segment only contributes how torn this particular band is.
+func _shade_segment(
+        segment: MeshInstance3D,
+        index: int,
+        local_damage: float
+) -> void:
+    if index < 0 or index >= supports.size() or not is_instance_valid(supports[index]):
+        return
+    var state := MaterialResponse.state_for(
+        supports[index],
+        FoundryMaterial.PAINTED_STEEL
+    )
+    if state == null:
+        return
+    var surface := segment.material_override as StandardMaterial3D
+    if surface == null:
+        surface = GeomUtilLocal.material(state.composite_albedo(), 0.84, 0.30)
+        segment.material_override = surface
+    state.apply_to_material(surface)
+    var torn: Color = state.profile().get(
+        "fracture_face",
+        surface.albedo_color
+    )
+    surface.albedo_color = surface.albedo_color.lerp(
+        torn.darkened(0.55),
+        clampf(local_damage, 0.0, 1.0) * 0.62
+    )
+    surface.roughness = clampf(
+        surface.roughness + local_damage * 0.10,
+        0.04,
+        1.0
+    )
 
 func _break_support(index: int, direction: Vector3) -> void:
     if index < 0 or index >= supports.size():
@@ -281,6 +303,22 @@ func _break_support(index: int, direction: Vector3) -> void:
         hit_local.y,
         -SUPPORT_HEIGHT * 0.5 + 0.28,
         SUPPORT_HEIGHT * 0.5 - 0.28
+    )
+    var column_state := MaterialResponse.state_for(
+        old,
+        FoundryMaterial.PAINTED_STEEL
+    )
+    MaterialResponse.fracture(
+        old,
+        hit_world,
+        event_direction,
+        event_energy,
+        180.0,
+        {
+            "radius": 4.6,
+            "novelty": 0.92,
+            "tool_material": FoundryMaterial.HARDENED_STEEL
+        }
     )
     old.queue_free()
 
@@ -331,6 +369,14 @@ func _break_support(index: int, direction: Vector3) -> void:
             maxf(80.0, 220.0 - energy_ratio * 38.0),
             "support"
         )
+        var interior := clampf(0.34 + piece_height / SUPPORT_HEIGHT, 0.0, 1.0)
+        var inherited := MaterialResponse.adopt_fragment(
+            debris,
+            column_state,
+            interior
+        )
+        if debris.has_method("bind_surface_state"):
+            debris.bind_surface_state(inherited)
         var radial := debris.global_position - hit_world
         radial.y *= 0.35
         if radial.length_squared() < 0.001:
@@ -351,21 +397,6 @@ func _break_support(index: int, direction: Vector3) -> void:
             * piece_mass * impulse_scale * 0.74
         )
 
-    get_tree().call_group(
-        "physical_event_listener",
-        "physical_event",
-        {
-            "type": "fracture",
-            "position": hit_world,
-            "impulse": sqrt(maxf(2.0 * 180.0 * event_energy, 0.0)),
-            "mass": 180.0,
-            "fracture": 1.0,
-            "radius": 4.6,
-            "novelty": 0.92,
-            "material": "steel"
-        }
-    )
-
 func _evaluate_failure() -> void:
     var was_collapsed := collapsed
     super()
@@ -373,20 +404,23 @@ func _evaluate_failure() -> void:
         return
     var event_position := global_position + Vector3.UP * 3.4
     var event_mass := 950.0
+    var drop_height := 3.4
     if deck != null and is_instance_valid(deck):
         event_position = deck.global_position
         event_mass = deck.mass
-    get_tree().call_group(
-        "physical_event_listener",
-        "physical_event",
+        drop_height = maxf(deck.global_position.y - global_position.y, 0.5)
+    MaterialResponse.impact(
+        deck,
+        event_position,
+        Vector3.DOWN,
+        event_mass * 9.81 * drop_height,
+        event_mass,
+        FoundryMaterial.STRUCTURAL_STEEL,
         {
-            "type": "collapse",
-            "position": event_position,
-            "impulse": event_mass * 12.5,
-            "mass": event_mass,
-            "fracture": 1.0,
+            "type": MaterialResponse.EVENT_COLLAPSE,
             "radius": 11.0,
             "novelty": 1.0,
-            "material": "steel"
+            "area": 12.0,
+            "fracture": 1.0
         }
     )

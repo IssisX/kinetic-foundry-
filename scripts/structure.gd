@@ -16,6 +16,9 @@ const DeformationSkin = preload(
 
 signal structure_collapsed
 
+## Fraction of a support hit that travels up the column into the deck graph.
+const DECK_TRANSMISSION := 0.2167
+
 var support_health: Array[float] = [100.0, 100.0, 100.0, 100.0]
 var supports: Array[StaticBody3D] = []
 var support_meshes: Array[MeshInstance3D] = []
@@ -87,7 +90,15 @@ func _build_frame() -> void:
         deck_network,
         DeformationSkin.MODE_HORIZONTAL,
         Color(0.24, 0.25, 0.23),
-        Vector3(0.0, 0.245, 0.0)
+        Vector3(0.0, 0.245, 0.0),
+        FoundryMaterial.STRUCTURAL_STEEL
+    )
+    deck_skin.bind_surface_state(
+        MaterialResponse.register(
+            deck,
+            FoundryMaterial.STRUCTURAL_STEEL,
+            Color(0.24, 0.25, 0.23)
+        )
     )
 
     for x in [-4.15, -2.05, 0.0, 2.05, 4.15]:
@@ -138,6 +149,11 @@ func _make_support(index: int, pos: Vector3) -> StaticBody3D:
     support.set_script(SupportScript)
     support.set("frame", self)
     add_child(support)
+    MaterialResponse.register(
+        support,
+        FoundryMaterial.PAINTED_STEEL,
+        Color(0.39, 0.33, 0.20)
+    )
 
     var column: MeshInstance3D = GeomUtil.box_mesh(Vector3(0.72, 4.6, 0.72), Color(0.39, 0.33, 0.20), 0.80, 0.30)
     support.add_child(column)
@@ -178,9 +194,12 @@ func damage_support(
         var local_point := deck.to_local(hit_point)
         local_point = Vector3(local_point.x, 0.0, local_point.z)
         var local_direction := deck.global_basis.inverse() * direction
-        var impact_energy := source_energy
-        if impact_energy < 0.0:
-            impact_energy = effective_amount * effective_amount * 0.65
+        var impact_energy := source_energy * DECK_TRANSMISSION
+        if source_energy < 0.0:
+            impact_energy = (
+                EnergyPartition.nominal_impact_energy(effective_amount)
+                * DECK_TRANSMISSION
+            )
         _last_damage_point = local_point
         _last_damage_direction = local_direction.normalized()
         deck_network.apply_impact(
@@ -200,20 +219,6 @@ func damage_support(
             direction.z * effective_amount * 0.0009
         )
     _update_support_material(index)
-    ImpactFx.spawn(
-        get_parent(),
-        world_point
-        if world_point != Vector3.ZERO
-        else (
-            supports[index].global_position + Vector3.UP * 1.1
-            if is_instance_valid(supports[index])
-            else global_position
-        ),
-        direction,
-        Color(0.92, 0.56, 0.12),
-        clampf(effective_amount / 22.0, 0.8, 3.2),
-        8
-    )
     if support_health[index] <= 0.0:
         _break_support(index, direction)
     _apply_pre_failure_pose()
@@ -225,13 +230,19 @@ func _update_support_material(index: int) -> void:
     var mesh: MeshInstance3D = support_meshes[index]
     if not is_instance_valid(mesh):
         return
-    var ratio: float = support_health[index] / 100.0
-    var color: Color = Color(0.39, 0.33, 0.20)
-    if ratio < 0.70:
-        color = Color(0.48, 0.30, 0.12)
-    if ratio < 0.35:
-        color = Color(0.56, 0.18, 0.07)
-    mesh.material_override = GeomUtil.material(color, 0.88, 0.32)
+    if index >= supports.size() or not is_instance_valid(supports[index]):
+        return
+    var state := MaterialResponse.state_for(
+        supports[index],
+        FoundryMaterial.PAINTED_STEEL
+    )
+    if state == null:
+        return
+    var surface := mesh.material_override as StandardMaterial3D
+    if surface == null:
+        surface = GeomUtil.material(state.composite_albedo(), 0.88, 0.32)
+        mesh.material_override = surface
+    state.apply_to_material(surface)
 
 func _apply_pre_failure_pose() -> void:
     if collapsed or deck == null:
@@ -288,15 +299,15 @@ func _evaluate_failure() -> void:
         if hp > 0.0:
             alive += 1
     if alive <= 2:
+        var lost_capacity := 0.0
+        for hp in support_health:
+            lost_capacity += 100.0 - float(hp)
+        var collapse_energy := (
+            deck.mass * 9.81 * 2.2
+            + live_load_mass * 9.81 * 1.4
+            + lost_capacity * 62.0
+        )
         if deck_network != null:
-            var lost_capacity := 0.0
-            for hp in support_health:
-                lost_capacity += 100.0 - float(hp)
-            var collapse_energy := (
-                deck.mass * 9.81 * 2.2
-                + live_load_mass * 9.81 * 1.4
-                + lost_capacity * 62.0
-            )
             deck_network.fracture_by_energy(
                 _last_damage_point,
                 _last_damage_direction + Vector3.DOWN * 0.72,
@@ -309,7 +320,15 @@ func _evaluate_failure() -> void:
         deck.freeze = false
         deck.apply_torque_impulse(Vector3(4200.0, 900.0, -3600.0))
         deck.apply_central_impulse(Vector3(220.0, -180.0, -120.0))
-        ImpactFx.spawn(get_parent(), deck.global_position, Vector3.UP, Color(0.72, 0.48, 0.20), 5.0, 18)
+        # A steel deck landing on a concrete yard raises concrete dust. The
+        # surface that receives the load decides what comes off it.
+        MaterialResponse.impact_below(
+            deck.global_position,
+            Vector3.DOWN,
+            collapse_energy,
+            deck.mass,
+            {"reach": deck.global_position.y + 1.0, "radius": 9.0}
+        )
         structure_collapsed.emit()
 
 func _spawn_aftermath() -> void:

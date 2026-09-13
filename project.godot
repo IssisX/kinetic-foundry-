@@ -8,6 +8,7 @@ run/main_scene="res://Main.tscn"
 config/features=PackedStringArray("4.3", "GL Compatibility")
 
 [autoload]
+MaterialResponse="*res://scripts/material_response.gd"
 WorldExtension="*res://scripts/world_extension.gd"
 PopulationDetail="*res://scripts/population_detail.gd"
 AmbientActivity="*res://scripts/ambient_activity.gd"

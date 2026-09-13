@@ -1,21 +1,11 @@
 extends StaticBody3D
 
-const ImpactFx = preload("res://scripts/impact_fx.gd")
-
 var frame
 
 func machine_hit(amount: float, direction: Vector3) -> void:
     if frame == null:
         return
     var hit_pos := _infer_machine_contact_point()
-    ImpactFx.spawn(
-        get_parent(),
-        hit_pos,
-        direction,
-        Color(0.92, 0.57, 0.15),
-        clampf(amount / 22.0, 0.8, 4.2),
-        10
-    )
     var index := int(get_meta("support_index", -1))
     if frame.has_method("damage_support_at"):
         frame.damage_support_at(
@@ -73,17 +63,14 @@ func _infer_machine_contact_point() -> Vector3:
     return to_global(local)
 
 func _infer_impact_energy(amount: float) -> float:
-    var energy := amount * amount * 3.0
+    var force := 0.0
+    var effort := 0.0
     for machine in get_tree().get_nodes_in_group("machine"):
         if not is_instance_valid(machine):
             continue
         if not machine.has_method("get_sustained_contact_state"):
             continue
         var state: Dictionary = machine.get_sustained_contact_state()
-        var force := maxf(float(state.get("force", 0.0)), amount)
-        var effort := clampf(float(state.get("effort", 0.0)), 0.0, 1.0)
-        energy = maxf(
-            energy,
-            force * force * (0.30 + effort * 0.65)
-        )
-    return energy
+        force = maxf(force, float(state.get("force", 0.0)))
+        effort = maxf(effort, float(state.get("effort", 0.0)))
+    return EnergyPartition.nominal_impact_energy(amount, force, effort)

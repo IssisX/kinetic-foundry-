@@ -5,28 +5,37 @@ extends Node3D
 ## Collision remains coarse until separation; the rendered sheet, heat tint,
 ## and crack paths all come directly from solved node and bond state.
 
+const SURFACE_SHADER = preload(
+    "res://shaders/foundry_surface.gdshader"
+)
+
 const MODE_HORIZONTAL := 0
 const MODE_VERTICAL := 1
 
 var network
 var plane_mode := MODE_HORIZONTAL
 var base_color := Color(0.28, 0.29, 0.27)
+var material_id := FoundryMaterial.STRUCTURAL_STEEL
+var surface_state: SurfaceState
 var _surface: MeshInstance3D
 var _cracks: MeshInstance3D
-var _surface_material: StandardMaterial3D
+var _surface_material: ShaderMaterial
 var _crack_material: StandardMaterial3D
 var _seen_revision := -1
+var _seen_surface_revision := -1
 
 
 func configure(
         source,
         mode: int,
         color: Color,
-        local_offset: Vector3 = Vector3.ZERO
+        local_offset: Vector3 = Vector3.ZERO,
+        identity: int = FoundryMaterial.STRUCTURAL_STEEL
 ) -> void:
     network = source
     plane_mode = mode
     base_color = color
+    material_id = identity
     position = local_offset
     _surface = MeshInstance3D.new()
     _surface.name = "SolvedSurface"
@@ -35,14 +44,22 @@ func configure(
     _cracks.name = "SolvedCracks"
     add_child(_cracks)
 
-    _surface_material = StandardMaterial3D.new()
-    _surface_material.albedo_color = Color.WHITE
-    _surface_material.roughness = 0.88
-    _surface_material.metallic = 0.34
-    _surface_material.vertex_color_use_as_albedo = true
-    _surface_material.cull_mode = BaseMaterial3D.CULL_DISABLED
-    _surface_material.shading_mode = (
-        BaseMaterial3D.SHADING_MODE_PER_PIXEL
+    var data := FoundryMaterial.of(material_id)
+    _surface_material = ShaderMaterial.new()
+    _surface_material.shader = SURFACE_SHADER
+    _surface_material.set_shader_parameter("base_color", color)
+    _surface_material.set_shader_parameter(
+        "substrate_color",
+        data.get("substrate", color)
+    )
+    _surface_material.set_shader_parameter("oxide_color", data.get("oxide", color))
+    _surface_material.set_shader_parameter(
+        "metallic_base",
+        float(data.get("metallic", 0.34))
+    )
+    _surface_material.set_shader_parameter(
+        "roughness_base",
+        float(data.get("roughness", 0.86))
     )
     _surface.material_override = _surface_material
 
@@ -59,15 +76,41 @@ func configure(
     refresh(true)
 
 
+func bind_surface_state(state: SurfaceState) -> void:
+    surface_state = state
+    if state != null:
+        material_id = state.material_id
+    _seen_surface_revision = -1
+    _push_surface_uniforms()
+
+
 func refresh(force: bool = false) -> void:
     if network == null or _surface == null:
         return
+    _push_surface_uniforms()
     var revision: int = network.get_revision()
     if not force and revision == _seen_revision:
         return
     _seen_revision = revision
     _rebuild_surface()
     _rebuild_cracks()
+
+
+func _push_surface_uniforms() -> void:
+    if surface_state == null or _surface_material == null:
+        return
+    if surface_state.revision == _seen_surface_revision:
+        return
+    _seen_surface_revision = surface_state.revision
+    _surface_material.set_shader_parameter("exposure_level", surface_state.exposure)
+    _surface_material.set_shader_parameter("oxidation_level", surface_state.oxidation)
+    _surface_material.set_shader_parameter("film_amount", surface_state.film_amount())
+    _surface_material.set_shader_parameter("film_color", surface_state.film_color())
+    _surface_material.set_shader_parameter("film_gloss", surface_state.film_gloss())
+    _surface_material.set_shader_parameter(
+        "thermal_emission",
+        surface_state.emission_energy() * 0.35
+    )
 
 
 func _rebuild_surface() -> void:
@@ -84,11 +127,11 @@ func _rebuild_surface() -> void:
             vertices.append(_map_position(
                 network.get_node_position(index)
             ))
-            var damage: float = network.get_node_damage(index)
-            var heat := Color(0.92, 0.20, 0.025)
-            colors.append(base_color.lerp(
-                heat,
-                smoothstep(0.24, 1.0, damage) * 0.82
+            colors.append(Color(
+                clampf(network.get_node_damage(index), 0.0, 1.0),
+                clampf(network.get_node_heat(index), 0.0, 1.0),
+                clampf(network.get_node_load(index), 0.0, 1.0),
+                1.0
             ))
             uvs.append(Vector2(
                 float(column) / float(grid.x - 1),
@@ -181,7 +224,11 @@ func _rebuild_cracks() -> void:
         var half_length := first.distance_to(second) * (
             0.16 + damage * 0.18
         )
-        var half_width := 0.010 + damage * 0.022
+        # Tension pulls a bond apart and shows as an opening. Compression
+        # does not: a crushed brace goes plastic, it does not smile.
+        var tension := maxf(0.0, -float(bond.get("lambda", 0.0)))
+        var opening := tension / (1.0 + tension * 40.0)
+        var half_width := 0.010 + damage * 0.022 + opening
         var base := vertices.size()
         vertices.append(
             midpoint - crack_axis * half_length - tangent * half_width

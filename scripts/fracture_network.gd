@@ -9,6 +9,12 @@ extends RefCounted
 
 signal topology_changed(component_count: int)
 
+## Maps authored spring stiffness into an XPBD compliance.
+const STIFFNESS_TO_COMPLIANCE := 280.0
+## Duals are kept between steps. Zeroing them every substep throws away the
+## constraint impulse estimate that fracture, audio and admittance read.
+const WARM_START_RETENTION := 0.6
+
 var columns := 0
 var rows := 0
 var span := Vector3.ONE
@@ -46,6 +52,7 @@ var _release_direction := Vector3.UP
 var _fracture_finalized := false
 var _last_impact_point := Vector3.ZERO
 var _last_impact_direction := Vector3.UP
+var _last_substep_delta := 0.016
 
 
 func configure_grid(
@@ -172,7 +179,7 @@ func _add_bond(
         "b": second,
         "rest": rest_length,
         "stiffness": stiffness,
-        "compliance": 1.0 / maxf(stiffness * 280.0, 1.0),
+        "compliance": 1.0 / maxf(stiffness * STIFFNESS_TO_COMPLIANCE, 1.0),
         "lambda": 0.0,
         "plastic": 0.0,
         "history": 0.0,
@@ -304,6 +311,12 @@ func step(delta: float) -> void:
     var safe_delta := clampf(delta, 0.002, 0.12)
     var substeps := clampi(ceili(safe_delta / 0.016), 1, 8)
     var sub_delta := safe_delta / float(substeps)
+    _last_substep_delta = sub_delta
+    for bond in _bonds:
+        if bool(bond.active):
+            bond.lambda = float(bond.lambda) * WARM_START_RETENTION
+        else:
+            bond.lambda = 0.0
     for _i in substeps:
         _step_substep(sub_delta)
     clear_forces()
@@ -322,8 +335,8 @@ func _step_substep(delta: float) -> void:
         _positions[i] += _velocities[i] * delta
 
     for bond in _bonds:
-        bond.lambda = 0.0
         if not bool(bond.active):
+            bond.lambda = 0.0
             continue
         _update_bond_material(bond)
 
@@ -896,6 +909,44 @@ func get_node_damage(index: int) -> float:
     return damage / maxf(count, 1.0)
 
 
+## Peak tensile elastic strain on the bonds meeting at this node, mapped to
+## 0..1. This is the field the skin reads as heat; it is not a temperature.
+func get_node_heat(index: int) -> float:
+    if index < 0 or index >= _positions.size():
+        return 0.0
+    var peak := 0.0
+    for bond in _bonds:
+        if not bool(bond.active):
+            continue
+        if int(bond.a) != index and int(bond.b) != index:
+            continue
+        var rest := maxf(float(bond.rest), 0.0001)
+        var length := _positions[int(bond.a)].distance_to(
+            _positions[int(bond.b)]
+        )
+        var elastic := (length - rest) / rest - float(bond.plastic)
+        peak = maxf(peak, absf(elastic))
+    return smoothstep(0.2, 1.0, peak / maxf(failure_strain, 0.0001))
+
+
+## Constraint impulse carried by this node, as a fraction of its own weight.
+## lambda / dt is the axial force estimate; anything that wants to know how
+## hard the structure is working reads this rather than a HUD scalar.
+func get_node_load(index: int) -> float:
+    if index < 0 or index >= _positions.size():
+        return 0.0
+    var impulse := 0.0
+    for bond in _bonds:
+        if not bool(bond.active):
+            continue
+        if int(bond.a) != index and int(bond.b) != index:
+            continue
+        impulse += absf(float(bond.lambda))
+    var force := impulse / maxf(_last_substep_delta, 0.0001)
+    var ratio := force / maxf(_node_mass * 9.81, 0.001)
+    return ratio / (1.0 + ratio)
+
+
 func get_bond_visuals() -> Array[Dictionary]:
     var result: Array[Dictionary] = []
     for bond in _bonds:
@@ -903,6 +954,8 @@ func get_bond_visuals() -> Array[Dictionary]:
             "a": int(bond.a),
             "b": int(bond.b),
             "damage": float(bond.damage),
+            "lambda": float(bond.lambda),
+            "plastic": float(bond.plastic),
             "active": bool(bond.active)
         })
     return result
