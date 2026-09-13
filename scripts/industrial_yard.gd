@@ -387,6 +387,25 @@ func _build_loose_props() -> void:
     _spawn_box_prop(Vector3(-9.1, 0.42, 5.2), Vector3(0.84, 0.84, 0.84), Color(0.23, 0.17, 0.09), 38.0)
     _spawn_box_prop(Vector3(6.5, 0.38, 11.5), Vector3(2.8, 0.30, 0.32), Color(0.24, 0.25, 0.23), 88.0)
     _spawn_box_prop(Vector3(6.6, 0.72, 11.1), Vector3(2.6, 0.30, 0.32), Color(0.24, 0.25, 0.23), 88.0)
+    # Steel the excavator can actually pick up and use as a tool.
+    _spawn_box_prop(
+        Vector3(8.4, 0.22, -8.4),
+        Vector3(5.6, 0.30, 0.38),
+        Color(0.30, 0.31, 0.29),
+        420.0
+    )
+    _spawn_box_prop(
+        Vector3(8.6, 0.54, -8.85),
+        Vector3(5.2, 0.30, 0.38),
+        Color(0.28, 0.29, 0.27),
+        390.0
+    )
+    _spawn_box_prop(
+        Vector3(-7.2, 0.20, 2.4),
+        Vector3(1.85, 0.22, 1.25),
+        Color(0.22, 0.23, 0.22),
+        310.0
+    )
 
 func _spawn_barrel(pos: Vector3, color: Color) -> void:
     var prop := PhysicsPropScript.new()
@@ -398,7 +417,7 @@ func _spawn_box_prop(pos: Vector3, size: Vector3, color: Color, mass_value: floa
     var prop := PhysicsPropScript.new()
     prop.position = pos
     add_child(prop)
-    prop.configure_box(size, color, mass_value, 72.0)
+    prop.configure_box(size, color, mass_value, maxf(72.0, mass_value * 1.85))
 
 func _build_work_lights() -> void:
     _yard_light(Vector3(-14.0, 7.3, 4.0), Color(1.0, 0.60, 0.25), 4.2, 17.0)

@@ -157,6 +157,13 @@ func physical_event(event: Dictionary) -> void:
         compose_collapse(event_position, maxf(radius, 8.0))
     elif salience >= 0.20:
         compose_impact(event_position, salience)
+        if _machine_view and (event_type == "fracture" or salience >= 0.45):
+            _queue_event(
+                event_position,
+                salience,
+                clampf(radius / 14.0, 0.20, 1.0),
+                lerpf(0.55, 1.05, salience)
+            )
 
 func compose_impact(world_position: Vector3, salience: float) -> void:
     if _manual_capture:
@@ -183,7 +190,7 @@ func compose_collapse(
         world_position: Vector3,
         world_extent: float = 10.0
 ) -> void:
-    if _manual_capture or _machine_view:
+    if _manual_capture:
         return
     var scale := clampf(world_extent / 14.0, 0.35, 1.0)
     _queue_event(
@@ -192,6 +199,8 @@ func compose_collapse(
         scale,
         1.20
     )
+    if _machine_view:
+        add_machine_impulse(0.058, Vector3(0.0, -1.0, 0.22))
 
 func _queue_event(
         world_position: Vector3,
@@ -377,14 +386,37 @@ func _update_machine_view(delta: float) -> void:
     else:
         _camera.global_transform = _machine_anchor.global_transform
     _camera.fov = _machine_fov
-    _current_fov = _machine_fov
     _camera.current = true
     _machine_camera_shake = _machine_camera_shake.lerp(
         Vector3.ZERO,
-        1.0 - exp(-17.0 * delta)
+        1.0 - exp(-7.5 * delta)
     )
     _camera.global_position += (
         _camera.global_basis * _machine_camera_shake
+    )
+
+    _event_remaining = maxf(0.0, _event_remaining - delta)
+    if _event_remaining <= 0.0 or _event_point == Vector3.ZERO:
+        return
+    var event_phase := _event_remaining / maxf(_event_duration, 0.001)
+    var envelope := (
+        minf(1.0, (1.0 - event_phase) * 6.0)
+        * minf(1.0, event_phase * 3.5)
+    )
+    var look_blend := envelope * clampf(_event_salience, 0.0, 1.0) * 0.78
+    var look := _event_point - _camera.global_position
+    if look.length_squared() < 0.25:
+        return
+    var from := _camera.global_transform
+    var to := Transform3D(
+        Basis.looking_at(look, Vector3.UP),
+        from.origin
+    )
+    _camera.global_transform = from.interpolate_with(to, look_blend)
+    _camera.fov = lerpf(
+        _machine_fov,
+        _machine_fov + 11.0 * _event_scale,
+        envelope
     )
 
 func _resolve_camera_collision(

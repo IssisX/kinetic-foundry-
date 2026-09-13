@@ -3,7 +3,6 @@ extends "res://scripts/excavator.gd"
 const MACHINE_EFFECTIVE_MASS := 2600.0
 const TRACK_HALF_WIDTH := 1.48
 const TRACK_HALF_LENGTH := 2.20
-const ARM_EFFECTIVE_MASS := 360.0
 const FORCE_TO_NEWTONS := 145.0
 
 var _hydraulic_fx_budget := 0.0
@@ -399,38 +398,9 @@ func _apply_machine_damage(amount: float, direction: Vector3) -> void:
     _previous_hydraulic_health = hydraulic_health
 
 func _collect_hard_arm_contacts() -> Array[Node]:
-    var contacts: Array[Node] = []
-    if _arm_shapes.is_empty() or get_world_3d() == null:
-        return contacts
-    var space := get_world_3d().direct_space_state
-    var exclude: Array[RID] = [get_rid()]
-    if held_load is CollisionObject3D:
-        exclude.append(held_load.get_rid())
+    return super()
 
-    for collision in _arm_shapes:
-        if collision == null or collision.shape == null:
-            continue
-        var query := PhysicsShapeQueryParameters3D.new()
-        query.shape = collision.shape
-        query.transform = collision.global_transform
-        query.collision_mask = 1 | 8
-        query.collide_with_bodies = true
-        query.collide_with_areas = false
-        query.exclude = exclude
-        var hits := space.intersect_shape(query, 24)
-        for hit in hits:
-            var collider = hit.get("collider")
-            if collider == null or collider == self or collider == held_load:
-                continue
-            if collider is RigidBody3D and not collider.freeze:
-                continue
-            if not contacts.has(collider):
-                contacts.append(collider)
-    return contacts
 
-## A bucket held against steel and dragged is doing friction work on a real
-## trajectory. That work is what marks the plate, heats it and throws sparks;
-## none of those are separately authored here.
 func _react_to_arm_contacts(contacts: Array[Node]) -> void:
     super(contacts)
     if contacts.is_empty() or _tool_tip_speed < 0.35:
@@ -514,7 +484,7 @@ func _resolve_arm_contact_pose() -> void:
     _push_dynamic_arm_contacts()
 
 func _push_dynamic_arm_contacts() -> void:
-    if _arm_shapes.is_empty() or get_world_3d() == null:
+    if get_world_3d() == null:
         return
     var chassis_motion := Vector3(velocity.x, 0.0, velocity.z)
     var motion := _tool_tip_velocity + chassis_motion
@@ -528,70 +498,64 @@ func _push_dynamic_arm_contacts() -> void:
         else -_tool.global_basis.z
     )
     var force := get_tool_force()
-    var space := get_world_3d().direct_space_state
     var exclude: Array[RID] = [get_rid()]
     if held_load is CollisionObject3D:
         exclude.append(held_load.get_rid())
 
     var affected: Dictionary = {}
-    for collision in _arm_shapes:
-        if collision == null or collision.shape == null:
+    _collect_dynamic_hits(_arm_shapes, exclude, affected)
+    if held_load is CollisionObject3D:
+        var load_shapes: Array = []
+        var stack: Array = [held_load]
+        while not stack.is_empty():
+            var node: Node = stack.pop_back()
+            if node is CollisionShape3D:
+                load_shapes.append(node)
+            for child in node.get_children():
+                stack.append(child)
+        _collect_dynamic_hits(load_shapes, exclude, affected)
+
+    for id in affected:
+        var body = affected[id]
+        if not is_instance_valid(body):
             continue
-        var query := PhysicsShapeQueryParameters3D.new()
-        query.shape = collision.shape
-        query.transform = collision.global_transform
-        query.collision_mask = 8
-        query.collide_with_bodies = true
-        query.collide_with_areas = false
-        query.exclude = exclude
-        var hits := space.intersect_shape(query, 24)
-        for hit in hits:
-            var body = hit.get("collider")
-            if not (body is RigidBody3D) or body.freeze or body == held_load:
-                continue
-            var id: int = body.get_instance_id()
-            if affected.has(id):
-                continue
-            affected[id] = true
-            if body.has_method("machine_hit"):
-                _deliver_machine_hit(
-                    body,
-                    force * 0.42,
-                    direction,
-                    collision.global_position
-                )
-            else:
-                MaterialResponse.impact(
-                    body,
-                    collision.global_position,
-                    direction,
-                    EnergyPartition.collision_energy(
-                        ARM_EFFECTIVE_MASS,
-                        body.mass,
-                        speed
-                    ),
+        var hit_point: Vector3 = (body as Node3D).global_position
+        if body.has_method("machine_hit"):
+            _deliver_machine_hit(
+                body,
+                force * 0.42,
+                direction,
+                hit_point
+            )
+        else:
+            MaterialResponse.impact(
+                body,
+                hit_point,
+                direction,
+                EnergyPartition.collision_energy(
+                    ARM_EFFECTIVE_MASS + load_mass(),
                     body.mass,
-                    FoundryMaterial.HARDENED_STEEL,
-                    {"area": 0.10, "radius": 3.0}
-                )
-                var impulse_mag: float = minf(
-                    (8.0 + speed * 7.5) * body.mass,
-                    2400.0
-                )
-                var contact_offset: Vector3 = body.to_local(
-                    collision.global_position
-                )
-                body.apply_impulse(
-                    direction * impulse_mag
-                    + Vector3.UP * body.mass * 0.55,
-                    contact_offset
-                )
-                body.apply_torque_impulse(
-                    Vector3(direction.z, 0.18, -direction.x)
-                    * body.mass
-                    * minf(speed, 8.0)
-                    * 0.28
-                )
+                    speed
+                ),
+                body.mass,
+                FoundryMaterial.HARDENED_STEEL,
+                {"area": 0.10, "radius": 3.0}
+            )
+            var impulse_mag: float = minf(
+                (8.0 + speed * 7.5) * body.mass,
+                2400.0
+            )
+            body.apply_impulse(
+                direction * impulse_mag
+                + Vector3.UP * body.mass * 0.55,
+                body.to_local(hit_point)
+            )
+            body.apply_torque_impulse(
+                Vector3(direction.z, 0.18, -direction.x)
+                * body.mass
+                * minf(speed, 8.0)
+                * 0.28
+            )
 
     if not affected.is_empty():
         if (
@@ -612,3 +576,33 @@ func _push_dynamic_arm_contacts() -> void:
                 ),
                 local_bump
             )
+
+
+func _collect_dynamic_hits(
+        shapes: Array,
+        exclude: Array[RID],
+        affected: Dictionary
+) -> void:
+    if get_world_3d() == null:
+        return
+    var space := get_world_3d().direct_space_state
+    for collision in shapes:
+        if collision == null or collision.shape == null:
+            continue
+        var query := PhysicsShapeQueryParameters3D.new()
+        query.shape = collision.shape
+        query.transform = collision.global_transform
+        query.collision_mask = 8
+        query.collide_with_bodies = true
+        query.collide_with_areas = false
+        query.exclude = exclude
+        var hits := space.intersect_shape(query, 24)
+        for hit in hits:
+            var body = hit.get("collider")
+            if not (body is RigidBody3D) or body.freeze or body == held_load:
+                continue
+            if is_hard_world_contact(body):
+                continue
+            var id: int = body.get_instance_id()
+            if not affected.has(id):
+                affected[id] = body

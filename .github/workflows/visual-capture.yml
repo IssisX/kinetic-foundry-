@@ -2,7 +2,7 @@ name: Kinetic Foundry Visual Capture
 
 on:
   push:
-    branches: [main]
+    branches: [main, Grok]
     paths:
       - ".capture-request"
       - ".github/workflows/visual-capture.yml"
@@ -89,6 +89,7 @@ jobs:
             06_breached_route.png
             07_walk_single_support.png
             08_walk_double_support.png
+            09_crane_suspended_load.png
           )
           for name in "${expected[@]}"; do
             file="$CAPTURE_DIR/$name"
@@ -114,4 +115,4 @@ jobs:
           git add -A captures/latest
           if git diff --cached --quiet; then exit 0; fi
           git commit -m "[skip capture] Update Kinetic Foundry visual captures"
-          git push origin HEAD:main
+          git push origin HEAD:${{ github.ref_name }}

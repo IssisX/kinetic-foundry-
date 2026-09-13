@@ -120,8 +120,9 @@ func configure_box(size: Vector3, color: Color, mass_value: float = 75.0, hp: fl
     set_meta("source_tag", "yard_prop")
     barrel_shape = false
     impact_color = color.lightened(0.32)
-    add_child(GeomUtil.box_mesh(size, color, 0.86, 0.16))
+    add_child(GeomUtil.box_mesh(size, color, 0.86, 0.16 if mass_value < 200.0 else 0.72))
     GeomUtil.add_box_collision(self, size)
+    _register_material()
 
 func configure_barrel(radius: float, height: float, color: Color, mass_value: float = 48.0, hp: float = 58.0) -> void:
     mass = mass_value
@@ -138,6 +139,23 @@ func configure_barrel(radius: float, height: float, color: Color, mass_value: fl
         var ring := GeomUtil.cylinder_mesh(radius * 1.045, 0.06, Color(0.075, 0.08, 0.075), 0.72, 0.28)
         ring.position.y = y
         add_child(ring)
+    _register_material()
+
+
+func _register_material() -> void:
+    var material_id := FoundryMaterial.TIMBER
+    if mass >= 200.0:
+        material_id = FoundryMaterial.STRUCTURAL_STEEL
+    elif barrel_shape:
+        material_id = FoundryMaterial.PAINTED_STEEL
+    MaterialResponse.register(self, material_id, source_color)
+
+
+func _material_id() -> int:
+    return MaterialResponse.material_of(
+        self,
+        FoundryMaterial.STRUCTURAL_STEEL if mass >= 200.0 else FoundryMaterial.TIMBER
+    )
 
 func set_held(value: bool) -> void:
     held = value
@@ -160,6 +178,7 @@ func set_machine_held(value: bool) -> void:
         freeze = false
         can_sleep = false
         sleeping = false
+        continuous_cd = true
         linear_damp = maxf(linear_damp, 3.2)
         angular_damp = maxf(angular_damp, 3.8)
         return
@@ -168,6 +187,7 @@ func set_machine_held(value: bool) -> void:
     freeze = false
     can_sleep = true
     sleeping = false
+    continuous_cd = false
     _restore_machine_damping()
 
 func _restore_machine_damping() -> void:
@@ -266,29 +286,47 @@ func _spawn_fragments(direction: Vector3) -> void:
     var parent := get_parent()
     if parent == null:
         return
+    var parent_state := MaterialResponse.state_for(self, _material_id())
     var fragment_count := 5 if barrel_shape else 4
+    var leftover := float(
+        EnergyPartition.split(
+            EnergyPartition.collision_energy(
+                mass,
+                900.0,
+                maxf(linear_velocity.length(), 3.5)
+            )
+        ).kinetic
+    )
     for i in fragment_count:
-        var piece := RigidBody3D.new()
+        var piece := PhysicsProp.new()
         piece.global_position = global_position + Vector3(
             (float(i % 2) - 0.5) * source_size.x * 0.35,
             0.18 + float(i % 3) * 0.10,
             (float((i + 1) % 2) - 0.5) * source_size.z * 0.35
         )
-        piece.mass = maxf(4.0, mass / float(fragment_count) * 0.48)
-        piece.collision_layer = 8
-        piece.collision_mask = 1 | 2 | 4 | 8
-        parent.add_child(piece)
+        var piece_mass := maxf(4.0, mass / float(fragment_count) * 0.48)
         var chunk_size := Vector3(
             maxf(0.18, source_size.x * (0.34 if barrel_shape else 0.42)),
             maxf(0.16, source_size.y * 0.26),
             maxf(0.18, source_size.z * (0.34 if barrel_shape else 0.42))
         )
-        piece.add_child(GeomUtil.box_mesh(chunk_size, source_color.darkened(0.10 + float(i) * 0.025), 0.92, 0.22))
-        GeomUtil.add_box_collision(piece, chunk_size)
+        parent.add_child(piece)
+        piece.configure_box(
+            chunk_size,
+            source_color.darkened(0.10 + float(i) * 0.025),
+            piece_mass,
+            maxf(18.0, health * 0.28)
+        )
+        MaterialResponse.adopt_fragment(piece, parent_state, 0.55)
+        piece.continuous_cd = true
+        var share := leftover / float(fragment_count)
+        var speed := sqrt(2.0 * share / maxf(piece.mass, 0.001))
         var scatter := Vector3(
             direction.x + (-0.7 + float(i) * 0.31),
             0.55 + float(i % 2) * 0.32,
             direction.z + (0.6 - float(i) * 0.22)
         ).normalized()
-        piece.apply_central_impulse(scatter * piece.mass * (3.8 + float(i) * 0.45))
-        piece.apply_torque_impulse(Vector3(scatter.z, 0.6, -scatter.x) * piece.mass * 1.8)
+        piece.apply_central_impulse(scatter * piece.mass * speed)
+        piece.apply_torque_impulse(
+            Vector3(scatter.z, 0.6, -scatter.x) * piece.mass * speed * 0.22
+        )

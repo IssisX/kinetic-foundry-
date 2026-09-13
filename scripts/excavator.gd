@@ -13,6 +13,10 @@ var tool_angle := -0.18
 var arm_yaw := 0.0
 var ai_time := 0.0
 
+const GRAB_MASS_LIMIT := 1600.0
+const ARM_CONTACT_MASK := 1 | 8
+const ARM_EFFECTIVE_MASS := 360.0
+
 var hydraulic_health := 260.0
 var track_health := 320.0
 
@@ -287,32 +291,58 @@ func _resolve_arm_contact_pose() -> void:
 
 func _collect_hard_arm_contacts() -> Array[Node]:
     var contacts: Array[Node] = []
-    if _arm_shapes.is_empty() or get_world_3d() == null:
+    if get_world_3d() == null:
         return contacts
-    var space := get_world_3d().direct_space_state
     var exclude: Array[RID] = [get_rid()]
     if held_load is CollisionObject3D:
         exclude.append(held_load.get_rid())
     for collision in _arm_shapes:
-        if collision == null or collision.shape == null:
-            continue
-        var query := PhysicsShapeQueryParameters3D.new()
-        query.shape = collision.shape
-        query.transform = collision.global_transform
-        query.collision_mask = 8
-        query.collide_with_bodies = true
-        query.collide_with_areas = false
-        query.exclude = exclude
-        var hits := space.intersect_shape(query, 16)
-        for hit in hits:
-            var collider = hit.get("collider")
-            if collider == null or collider == self or collider == held_load:
-                continue
-            if collider is RigidBody3D and not collider.freeze:
-                continue
-            if not contacts.has(collider):
-                contacts.append(collider)
+        _append_shape_contacts(collision, ARM_CONTACT_MASK, exclude, contacts)
+    if held_load is CollisionObject3D:
+        _append_body_contacts(held_load, ARM_CONTACT_MASK, exclude, contacts)
     return contacts
+
+
+func _append_body_contacts(
+        body: CollisionObject3D,
+        mask: int,
+        exclude: Array[RID],
+        contacts: Array[Node]
+) -> void:
+    if body == null or not is_instance_valid(body):
+        return
+    var stack: Array = [body]
+    while not stack.is_empty():
+        var node: Node = stack.pop_back()
+        if node is CollisionShape3D:
+            _append_shape_contacts(node, mask, exclude, contacts)
+        for child in node.get_children():
+            stack.append(child)
+
+
+func _append_shape_contacts(
+        collision: CollisionShape3D,
+        mask: int,
+        exclude: Array[RID],
+        contacts: Array[Node]
+) -> void:
+    if collision == null or collision.shape == null or get_world_3d() == null:
+        return
+    var query := PhysicsShapeQueryParameters3D.new()
+    query.shape = collision.shape
+    query.transform = collision.global_transform
+    query.collision_mask = mask
+    query.collide_with_bodies = true
+    query.collide_with_areas = false
+    query.exclude = exclude
+    var hits := get_world_3d().direct_space_state.intersect_shape(query, 24)
+    for hit in hits:
+        var collider = hit.get("collider")
+        if not is_hard_world_contact(collider):
+            continue
+        if not contacts.has(collider):
+            contacts.append(collider)
+
 
 func _react_to_arm_contacts(contacts: Array[Node]) -> void:
     if _arm_contact_cooldown > 0.0:
@@ -348,7 +378,7 @@ func _try_grip_load() -> bool:
     var best = null
     var best_distance := INF
     for body in _impact_probe.get_overlapping_bodies():
-        if body == self or not body.is_in_group("physics_prop") or body.mass > 420.0:
+        if body == self or not body.is_in_group("physics_prop") or body.mass > GRAB_MASS_LIMIT:
             continue
         var d: float = body.global_position.distance_to(_grip_anchor.global_position)
         if d < best_distance:
@@ -360,7 +390,7 @@ func _try_grip_load() -> bool:
         return false
     held_load = best
     hud.set_context(
-        "LOAD CLAMPED // MASS AMPLIFIES IMPACT + BRACING"
+        "LOAD CLAMPED // %d KG IS THE TOOL" % int(best.mass)
     )
     return true
 
@@ -416,16 +446,22 @@ func _deliver_machine_hit(
         direction: Vector3,
         world_point: Vector3
 ) -> void:
-    var effective_mass := 360.0
-    if is_holding_load():
-        effective_mass += float(held_load.get("mass"))
+    var tool_mass := ARM_EFFECTIVE_MASS + load_mass()
     var relative_speed := maxf(
         _tool_tip_speed,
         Vector3(velocity.x, 0.0, velocity.z).length()
     )
-    var impact_energy := (
-        0.5 * effective_mass * relative_speed * relative_speed
+    var kinematic := EnergyPartition.collision_energy(
+        tool_mass,
+        struck_mass(body),
+        relative_speed
     )
+    var hydraulic := EnergyPartition.nominal_impact_energy(
+        amount,
+        get_tool_force(),
+        clampf(relative_speed / 8.0, 0.0, 1.0)
+    )
+    var impact_energy := maxf(kinematic, hydraulic)
     if body.has_method("machine_hit_at"):
         body.machine_hit_at(
             amount,

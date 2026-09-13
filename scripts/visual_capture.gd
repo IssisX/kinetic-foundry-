@@ -157,14 +157,28 @@ func _stage_excavator_operator_pov() -> void:
 
 func _stage_structure_damage() -> void:
     _release_capture_load()
+    var beam = _heaviest_prop()
+    if beam != null and game.excavator != null:
+        game.excavator.hold_load(beam)
+        beam.global_position = (
+            game.structure.global_position
+            + Vector3(-2.4, 1.35, 0.8)
+        )
+        game.excavator.global_position = Vector3(7.2, -0.17, -10.8)
+        game.excavator.rotation.y = -0.55
+        game.excavator.arm_yaw = 0.18
+        game.excavator.boom_angle = -0.22
+        game.excavator.stick_angle = 0.46
+        game.excavator.tool_angle = -0.42
+        game.excavator._apply_arm_pose()
     game.structure.damage_support(0, 68.0, Vector3(1.0, 0.0, 0.22))
     game.structure.damage_support(2, 34.0, Vector3(0.72, 0.0, -0.34))
     game.mission.stage = 2
     _set_machine_hud()
-    game.hud.set_objective("DROP THE TRANSFER PLATFORM", "LOAD PATH COMPROMISED // KEEP WORKING THE WEAK SIDE")
+    game.hud.set_objective("DROP THE TRANSFER PLATFORM", "420 KG BEAM IS THE TOOL // READ THE LOAD PATH THROUGH THE COLUMN")
     game.hud.set_objective_progress(0.52)
-    game.hud.set_machine_telemetry(0.84, 0.76, 0.90, 0.88, false)
-    game.hud.set_context("STRUCTURAL STEEL YIELDING // SUPPORT 01 CRITICAL")
+    game.hud.set_machine_telemetry(0.84, 0.76, 0.90, 0.88, true)
+    game.hud.set_context("MASS WORKING STEEL // SUPPORT 01 CRITICAL")
     _camera(Vector3(22.0, 10.5, -3.0), game.structure.global_position + Vector3(0.0, 2.5, 0.0), 50.0)
 
 func _stage_structure_collapse() -> void:
@@ -383,6 +397,18 @@ func _first_prop():
         if is_instance_valid(prop) and prop.mass <= 110.0:
             return prop
     return null
+
+func _heaviest_prop():
+    var best = null
+    var best_mass := 0.0
+    for prop in get_tree().get_nodes_in_group("physics_prop"):
+        if not is_instance_valid(prop):
+            continue
+        var prop_mass := float(prop.get("mass"))
+        if prop_mass > best_mass:
+            best_mass = prop_mass
+            best = prop
+    return best
 
 func _show_all_enemies(value: bool) -> void:
     for enemy in get_tree().get_nodes_in_group("enemy"):

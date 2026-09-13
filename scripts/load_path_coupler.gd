@@ -5,7 +5,7 @@ var structure
 var excavator
 var _sample_timer := 0.0
 
-func configure(structure_node, machine_node) -> void:
+func configure(structure_node, machine_node = null) -> void:
     structure = structure_node
     excavator = machine_node
 
@@ -31,25 +31,26 @@ func _physics_process(delta: float) -> void:
         if gate.has_method("get_load_path_state"):
             gate_state = gate.get_load_path_state()
 
-    if excavator == null or not excavator.has_method("set_load_path_feedback"):
-        return
-
-    var contact_state := {}
-    if excavator.has_method("get_sustained_contact_state"):
-        contact_state = excavator.get_sustained_contact_state()
-
-    var combined := structural_state.duplicate(true)
     var gate_damage := float(gate_state.get("damage", 0.0))
-    var deformation: Dictionary = combined.get("deformation", {})
-    deformation = deformation.duplicate(true)
-    deformation["max_displacement"] = maxf(
-        float(deformation.get("max_displacement", 0.0)),
-        gate_damage * 0.7
-    )
-    combined["deformation"] = deformation
-    combined["reaction_ratio"] = _contact_reaction(contact_state)
-    combined["contact_active"] = bool(contact_state.get("active", false))
-    excavator.set_load_path_feedback(combined)
+    for machine in get_tree().get_nodes_in_group("machine"):
+        if machine == null or not is_instance_valid(machine):
+            continue
+        if not machine.has_method("set_load_path_feedback"):
+            continue
+        var contact_state := {}
+        if machine.has_method("get_sustained_contact_state"):
+            contact_state = machine.get_sustained_contact_state()
+        var combined := structural_state.duplicate(true)
+        var deformation: Dictionary = combined.get("deformation", {})
+        deformation = deformation.duplicate(true)
+        deformation["max_displacement"] = maxf(
+            float(deformation.get("max_displacement", 0.0)),
+            gate_damage * 0.7
+        )
+        combined["deformation"] = deformation
+        combined["reaction_ratio"] = _contact_reaction(contact_state)
+        combined["contact_active"] = bool(contact_state.get("active", false))
+        machine.set_load_path_feedback(combined)
 
 func _contact_reaction(contact_state: Dictionary) -> float:
     if not bool(contact_state.get("active", false)):

@@ -9,6 +9,10 @@ extends CharacterBody3D
 ## second machine cannot quietly grow a second damage model or a second way
 ## of holding a load.
 
+## A rigid body below this mass is scrap the working assembly can sweep.
+## At or above it, the arm/load has to stop and spend energy.
+const HARD_CONTACT_MASS := 85.0
+
 signal player_entered(machine)
 signal player_exited(machine)
 signal machine_disabled(machine)
@@ -79,6 +83,33 @@ func get_health_ratio() -> float:
 
 func is_holding_load() -> bool:
     return held_load != null and is_instance_valid(held_load)
+
+
+func load_mass() -> float:
+    if not is_holding_load():
+        return 0.0
+    return maxf(float(held_load.get("mass")), 0.0)
+
+
+func struck_mass(body: Node) -> float:
+    if body == null:
+        return 900.0
+    if body is RigidBody3D:
+        return maxf((body as RigidBody3D).mass, 1.0)
+    var value = body.get("mass")
+    if value != null:
+        return maxf(float(value), 1.0)
+    return 900.0
+
+
+func is_hard_world_contact(collider: Node) -> bool:
+    if collider == null or collider == self:
+        return false
+    if is_holding_load() and collider == held_load:
+        return false
+    if collider is RigidBody3D and not (collider as RigidBody3D).freeze:
+        return (collider as RigidBody3D).mass >= HARD_CONTACT_MASS
+    return true
 
 
 func request_hijack(player: Node3D) -> bool:
