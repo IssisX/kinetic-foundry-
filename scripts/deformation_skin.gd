@@ -207,9 +207,10 @@ func _rebuild_cracks() -> void:
     var vertices := PackedVector3Array()
     var colors := PackedColorArray()
     var indices := PackedInt32Array()
+    var ribbon_threshold := Fidelity.ribbon_damage()
     for bond in network.get_bond_visuals():
         var damage := float(bond.damage)
-        if bool(bond.active) and damage < 0.42:
+        if bool(bond.active) and damage < ribbon_threshold:
             continue
         var first := _map_position(
             network.get_node_position(int(bond.a))

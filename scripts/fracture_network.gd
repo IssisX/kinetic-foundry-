@@ -551,8 +551,9 @@ func fracture_by_energy(
         local_point: Vector3,
         direction: Vector3,
         available_energy: float,
-        max_fragments: int = 7
+        max_fragments: int = -1
 ) -> Dictionary:
+    var fragment_cap := max_fragments if max_fragments > 0 else Fidelity.max_shards()
     var energy := clampf(available_energy, 0.0, 300000.0)
     _last_impact_point = local_point
     _last_impact_direction = (
@@ -572,7 +573,7 @@ func fracture_by_energy(
             energy / maxf(mean_cost * 2.6, 1.0)
         ))),
         2,
-        mini(max_fragments, _positions.size())
+        mini(fragment_cap, _positions.size())
     )
     var budget := energy * 0.42
     var labels: Array[int] = []
@@ -613,7 +614,7 @@ func fracture_into_columns() -> void:
         _last_impact_point,
         _last_impact_direction,
         maxf(_input_energy, fracture_energy_density * 18.0),
-        mini(columns, 7)
+        mini(columns, Fidelity.max_shards())
     )
 
 
@@ -891,6 +892,10 @@ func get_grid_size() -> Vector2i:
 
 func get_node_count() -> int:
     return _positions.size()
+
+
+func get_bond_count() -> int:
+    return _bonds.size()
 
 
 func get_node_position(index: int) -> Vector3:

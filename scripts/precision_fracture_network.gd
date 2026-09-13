@@ -69,7 +69,7 @@ func fracture_localized(
         local_point,
         impact_direction,
         impact_energy,
-        7
+        Fidelity.max_shards()
     )
 
 func _cut_ray_family(

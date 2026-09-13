@@ -56,6 +56,7 @@ func _process(delta: float) -> void:
     if OS.get_environment("KF_CAPTURE") == "1":
         return
     _update_interaction_prompt()
+    _update_fidelity_telemetry()
     _reclaim_timer = maxf(0.0, _reclaim_timer - delta)
     if _reclaim_timer <= 0.0:
         _try_enemy_reclaim()
@@ -247,6 +248,20 @@ func _on_structure_collapsed_camera() -> void:
     # Structural collapse now publishes one authoritative physical event;
     # camera and audio both consume that event instead of receiving bespoke calls.
     pass
+
+func _update_fidelity_telemetry() -> void:
+    if hud == null or not hud.has_method("set_fidelity_telemetry"):
+        return
+    if structure == null or structure.deck_network == null:
+        return
+    var network = structure.deck_network
+    hud.set_fidelity_telemetry(
+        network.get_node_count(),
+        network.get_bond_count(),
+        int(network.get_energy_state().get("components", 1)),
+        Performance.get_monitor(Performance.TIME_PHYSICS_PROCESS) * 1000.0
+    )
+
 
 func _update_interaction_prompt() -> void:
     if hud == null or not hud.has_method("set_interaction_hint") or player == null:

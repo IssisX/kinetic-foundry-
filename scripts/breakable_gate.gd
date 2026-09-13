@@ -31,6 +31,12 @@ var _load_damage_bank := 0.0
 func _ready() -> void:
     add_to_group("breachable")
     _build_gate()
+    Fidelity.live_changed.connect(_on_fidelity_live_changed)
+
+
+func _on_fidelity_live_changed(_f: int) -> void:
+    for network in panel_networks:
+        network.solver_iterations = Fidelity.iterations()
 
 func _build_gate() -> void:
     for side in [-1.0, 1.0]:
@@ -112,6 +118,7 @@ func _build_gate() -> void:
             0.24,
             610.0
         )
+        network.solver_iterations = Fidelity.iterations()
         panel_networks.append(network)
         _update_panel_skin(index)
 

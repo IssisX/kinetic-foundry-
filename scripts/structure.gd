@@ -19,6 +19,14 @@ signal structure_collapsed
 ## Fraction of a support hit that travels up the column into the deck graph.
 const DECK_TRANSMISSION := 0.2167
 
+## Deck identity: span and mass are physical facts that do not move when
+## the fidelity slider changes resolution. Only node/bond density does.
+const DECK_SPAN := Vector3(9.4, 0.0, 6.0)
+const DECK_MASS := 950.0
+const DECK_TOUGHNESS := 235.0
+const DECK_THICKNESS := 0.34
+const DECK_FRACTURE_ENERGY := 520.0
+
 var support_health: Array[float] = [100.0, 100.0, 100.0, 100.0]
 var supports: Array[StaticBody3D] = []
 var support_meshes: Array[MeshInstance3D] = []
@@ -40,6 +48,8 @@ var _last_damage_direction := Vector3.DOWN
 func _ready() -> void:
     add_to_group("structure")
     _build_frame()
+    Fidelity.live_changed.connect(_on_fidelity_live_changed)
+    Fidelity.rebuild_requested.connect(_on_fidelity_rebuild_requested)
 
 func _physics_process(delta: float) -> void:
     if deck_skin != null:
@@ -73,16 +83,18 @@ func _build_frame() -> void:
     deck.add_child(GeomUtil.box_mesh(Vector3(9.4, 0.48, 6.0), Color(0.18, 0.19, 0.175), 0.90, 0.24))
     GeomUtil.add_box_collision(deck, Vector3(9.4, 0.48, 6.0))
     deck_network = FractureNetwork.new()
+    var grid := Fidelity.deck_grid()
     deck_network.configure_grid(
-        5,
-        4,
-        Vector3(9.4, 0.0, 6.0),
-        950.0,
-        235.0,
+        grid.x,
+        grid.y,
+        DECK_SPAN,
+        DECK_MASS,
+        DECK_TOUGHNESS,
         false,
-        0.34,
-        520.0
+        DECK_THICKNESS,
+        DECK_FRACTURE_ENERGY
     )
+    deck_network.solver_iterations = Fidelity.iterations()
     deck_skin = DeformationSkin.new()
     deck_skin.name = "SolvedDeckSkin"
     deck.add_child(deck_skin)
@@ -244,6 +256,46 @@ func _update_support_material(index: int) -> void:
         mesh.material_override = surface
     state.apply_to_material(surface)
 
+func _on_fidelity_live_changed(_f: int) -> void:
+    if deck_network != null:
+        deck_network.solver_iterations = Fidelity.iterations()
+    if deck_skin != null:
+        deck_skin.refresh(true)
+
+
+## Grid size is topology. A cracked 5x4 cannot be upsampled onto a 12x8
+## without inventing damage, so this only runs on an intact deck: it resets
+## the structure rather than pretending to refine a wounded one.
+func _on_fidelity_rebuild_requested(_f: int) -> void:
+    if collapsed:
+        return
+    var grid := Fidelity.deck_grid()
+    deck_network.configure_grid(
+        grid.x,
+        grid.y,
+        DECK_SPAN,
+        DECK_MASS,
+        DECK_TOUGHNESS,
+        false,
+        DECK_THICKNESS,
+        DECK_FRACTURE_ENERGY
+    )
+    deck_network.solver_iterations = Fidelity.iterations()
+    for i in support_health.size():
+        support_health[i] = 100.0
+        support_brace[i] = 0.0
+        _update_support_material(i)
+    live_load_mass = 0.0
+    overload_ratio = 0.0
+    fatigue = 0.0
+    _overload_damage_bank = 0.0
+    deck.rotation = Vector3.ZERO
+    deck.position.y = 5.05
+    if deck_skin != null:
+        deck_skin.network = deck_network
+        deck_skin.refresh(true)
+
+
 func _apply_pre_failure_pose() -> void:
     if collapsed or deck == null:
         return
@@ -311,8 +363,7 @@ func _evaluate_failure() -> void:
             deck_network.fracture_by_energy(
                 _last_damage_point,
                 _last_damage_direction + Vector3.DOWN * 0.72,
-                collapse_energy,
-                7
+                collapse_energy
             )
             deck_network.step(0.024)
         collapsed = true

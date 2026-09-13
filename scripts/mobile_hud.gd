@@ -29,6 +29,12 @@ var _machine_tracks := 1.0
 var _machine_force := 0.0
 var _machine_holding := false
 
+var _fidelity_nodes := 0
+var _fidelity_bonds := 0
+var _fidelity_shards := 0
+var _fidelity_ms := 0.0
+var _fidelity_key_latch := false
+
 var _action_labels: Array[Label] = []
 var _mode_label: Label
 var _title_label: Label
@@ -134,6 +140,36 @@ func set_machine_telemetry(integrity: float, hydraulics: float, tracks: float, f
 func flash_damage() -> void:
     _damage_flash = 1.0
 
+## Counts are read fresh every call. If dragging F does not move these
+## numbers, the slider is decoration, not the mechanic it claims to be.
+func set_fidelity_telemetry(nodes: int, bonds: int, shards: int, ms_phys: float) -> void:
+    _fidelity_nodes = nodes
+    _fidelity_bonds = bonds
+    _fidelity_shards = shards
+    _fidelity_ms = ms_phys
+
+## Desktop-only debug control: quick verification path, not the touch
+## slider. '[' / ']' retune live knobs now; '\' commits a topology rebuild
+## at the current F.
+func _poll_fidelity_keys() -> void:
+    var down := (
+        Input.is_physical_key_pressed(KEY_BRACKETLEFT)
+        or Input.is_physical_key_pressed(KEY_BRACKETRIGHT)
+        or Input.is_physical_key_pressed(KEY_BACKSLASH)
+    )
+    if not down:
+        _fidelity_key_latch = false
+        return
+    if _fidelity_key_latch:
+        return
+    _fidelity_key_latch = true
+    if Input.is_physical_key_pressed(KEY_BACKSLASH):
+        Fidelity.request_rebuild(Fidelity.f)
+    elif Input.is_physical_key_pressed(KEY_BRACKETRIGHT):
+        Fidelity.set_live(Fidelity.f + 1)
+    elif Input.is_physical_key_pressed(KEY_BRACKETLEFT):
+        Fidelity.set_live(Fidelity.f - 1)
+
 func _refresh_labels() -> void:
     if _action_labels.size() < 3:
         return
@@ -172,6 +208,7 @@ func _apply_font_scale() -> void:
 
 func _process(delta: float) -> void:
     _resize_to_viewport()
+    _poll_fidelity_keys()
     _damage_flash = maxf(0.0, _damage_flash - delta * 3.8)
     var s := _ui_scale
     var margin := 28.0 * s
@@ -300,8 +337,33 @@ func _draw() -> void:
     _draw_target_bracket()
     if not _interaction_hint.is_empty():
         _draw_interaction_panel()
+    _draw_fidelity_panel()
     if _damage_flash > 0.0:
         draw_rect(Rect2(Vector2.ZERO, _view_size), Color(0.70, 0.045, 0.02, 0.13 * _damage_flash), false, 12.0 * _ui_scale)
+
+## The ceiling test in one line: F plus the counts it is supposed to move.
+## '[' ']' retune live, '\' commits a rebuild — desktop verification only.
+func _draw_fidelity_panel() -> void:
+    var s := _ui_scale
+    var text := "FIDELITY %d  [ ]  \\   nodes %d  bonds %d  shards %d  ms %.2f" % [
+        Fidelity.f,
+        _fidelity_nodes,
+        _fidelity_bonds,
+        _fidelity_shards,
+        _fidelity_ms
+    ]
+    var width := 560.0 * s
+    var pos := Vector2(_view_size.x - width - 22.0 * s, _view_size.y - 132.0 * s)
+    draw_rect(Rect2(pos, Vector2(width, 24.0 * s)), Color(0.010, 0.016, 0.016, 0.72))
+    draw_string(
+        ThemeDB.fallback_font,
+        pos + Vector2(10.0 * s, 17.0 * s),
+        text,
+        HORIZONTAL_ALIGNMENT_LEFT,
+        width - 20.0 * s,
+        maxi(10, int(13.0 * s)),
+        Color(0.70, 0.86, 0.92, 0.92)
+    )
 
 func _draw_status_panel() -> void:
     var s := _ui_scale
