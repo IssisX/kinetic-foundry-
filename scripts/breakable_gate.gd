@@ -1,7 +1,6 @@
 extends Node3D
 
 const GeomUtil = preload("res://scripts/geom.gd")
-const MaterialFx = preload("res://scripts/material_fx.gd")
 const GatePanelScript = preload("res://scripts/gate_panel.gd")
 const StructuralDebris = preload(
     "res://scripts/structural_debris.gd"
@@ -19,7 +18,9 @@ var panel_health := [120.0, 120.0]
 var panels: Array[StaticBody3D] = []
 var panel_networks: Array = []
 var panel_cells: Array = []
+var panel_states: Array = []
 var _panel_base_positions: Array[Vector3] = []
+var _panel_seen_revision: Array[int] = [-1, -1]
 var _last_hit_local: Array[Vector3] = []
 var _last_hit_energy: Array[float] = []
 var _last_hit_direction: Array[Vector3] = []
@@ -27,6 +28,8 @@ var breached := false
 var wedge_mass := 0.0
 var pry_energy := 0.0
 var _load_damage_bank := 0.0
+
+const GATE_TINT := Color(0.17, 0.18, 0.165)
 
 func _ready() -> void:
     add_to_group("breachable")
@@ -50,6 +53,9 @@ func _build_gate() -> void:
         panel.set("gate_owner", self)
         add_child(panel)
         panels.append(panel)
+        panel_states.append(
+            MaterialResponse.register(panel, FoundryMaterial.PAINTED_STEEL, GATE_TINT)
+        )
         _panel_base_positions.append(panel.position)
         _last_hit_local.append(Vector3.ZERO)
         _last_hit_energy.append(0.0)
@@ -158,7 +164,7 @@ func machine_hit(amount: float, direction: Vector3) -> void:
             amount,
             direction,
             panels[closest].global_position,
-            amount * amount * 3.2
+            EnergyPartition.nominal_impact_energy(amount)
         )
 
 func damage_panel(index: int, amount: float, direction: Vector3) -> void:
@@ -169,7 +175,7 @@ func damage_panel(index: int, amount: float, direction: Vector3) -> void:
         amount,
         direction,
         panels[index].global_position,
-        amount * amount * 3.2
+        EnergyPartition.nominal_impact_energy(amount)
     )
 
 func damage_panel_at(
@@ -203,7 +209,7 @@ func damage_panel_at(
 
     var energy := maxf(
         impact_energy,
-        amount * amount * 2.8
+        EnergyPartition.nominal_impact_energy(amount)
     )
     var impulse_magnitude := sqrt(maxf(2.0 * 310.0 * energy, 0.0))
     var network: PrecisionFractureNetwork = panel_networks[index]
@@ -237,21 +243,23 @@ func damage_panel_at(
         clampf(local_average.y * 0.06, -0.05, 0.05)
     )
 
-    MaterialFx.steel(
-        get_parent(),
-        world_point,
-        direction,
-        clampf(energy / 4800.0, 0.7, 5.4)
-    )
-    _emit_impact_event(
-        world_point,
-        impulse_magnitude,
-        energy,
-        float(deformation.get("broken_fraction", 0.0))
-    )
-
     var broken_fraction := float(
         deformation.get("broken_fraction", 0.0)
+    )
+    MaterialResponse.impact(
+        panel,
+        world_point,
+        direction,
+        energy,
+        310.0,
+        FoundryMaterial.HARDENED_STEEL,
+        {
+            "type": MaterialResponse.EVENT_MACHINE,
+            "area": 0.14,
+            "radius": maxf(CELL_SIZE, sqrt(energy) * 0.015),
+            "fracture": clampf(broken_fraction * 2.5 + energy / 22000.0, 0.0, 1.0),
+            "novelty": clampf(0.58 + energy / 18000.0, 0.58, 1.0)
+        }
     )
     var catastrophic := (
         broken_fraction > 0.18
@@ -261,10 +269,23 @@ func damage_panel_at(
         _break_panel(index, direction)
     breached = panel_health[0] <= 0.0 or panel_health[1] <= 0.0
 
-func _update_panel_skin(index: int) -> void:
+func _update_panel_skin(index: int, force: bool = false) -> void:
     if index < 0 or index >= panel_networks.size() or index >= panel_cells.size():
         return
     var network: PrecisionFractureNetwork = panel_networks[index]
+    var revision := network.get_revision()
+    if not force and index < _panel_seen_revision.size() and revision == _panel_seen_revision[index]:
+        return
+    if index < _panel_seen_revision.size():
+        _panel_seen_revision[index] = revision
+    var panel_state: SurfaceState = (
+        panel_states[index] if index < panel_states.size() else null
+    )
+    var base_color := GATE_TINT
+    var damaged_color := Color(0.62, 0.16, 0.025)
+    if panel_state != null:
+        base_color = panel_state.composite_albedo()
+        damaged_color = panel_state.profile().get("fracture_face", damaged_color)
     var cells: Array = panel_cells[index]
     for row in GRID_CELLS:
         for column in GRID_CELLS:
@@ -309,16 +330,15 @@ func _update_panel_skin(index: int) -> void:
                 clampf(float(state.get("height", CELL_SIZE)) / CELL_SIZE, 0.72, 1.32),
                 1.0
             )
-            var damage := float(state.get("damage", 0.0))
-            if damage > 0.015:
-                cell.material_override = GeomUtil.material(
-                    Color(0.17, 0.18, 0.165).lerp(
-                        Color(0.62, 0.16, 0.025),
-                        smoothstep(0.0, 1.0, damage) * 0.82
-                    ),
-                    0.86,
-                    0.30
-                )
+            var cell_damage := float(state.get("damage", 0.0))
+            var surface := cell.material_override as StandardMaterial3D
+            if surface == null:
+                surface = GeomUtil.material(base_color, 0.86, 0.30)
+                cell.material_override = surface
+            surface.albedo_color = base_color.lerp(
+                damaged_color,
+                smoothstep(0.0, 1.0, cell_damage) * 0.82
+            )
 
 func _break_panel(index: int, direction: Vector3) -> void:
     var old := panels[index]
@@ -326,6 +346,9 @@ func _break_panel(index: int, direction: Vector3) -> void:
         return
     var transform := old.global_transform
     var break_pos := old.global_position
+    var panel_state: SurfaceState = (
+        panel_states[index] if index < panel_states.size() else null
+    )
     var network: PrecisionFractureNetwork = panel_networks[index]
     network.fracture_localized(
         _last_hit_local[index],
@@ -334,9 +357,16 @@ func _break_panel(index: int, direction: Vector3) -> void:
     )
     network.step(0.024)
     var specs := network.get_fragment_specs(0.24, 1)
-    old.queue_free()
-
     var event_energy := maxf(_last_hit_energy[index], 7600.0)
+    MaterialResponse.fracture(
+        old,
+        break_pos,
+        direction + Vector3.UP * 0.18,
+        event_energy,
+        310.0,
+        {"radius": PANEL_SIZE, "novelty": 1.0, "tool_material": FoundryMaterial.HARDENED_STEEL}
+    )
+    old.queue_free()
     for i in specs.size():
         var spec: Dictionary = specs[i]
         var debris := StructuralDebris.new()
@@ -361,6 +391,9 @@ func _break_panel(index: int, direction: Vector3) -> void:
             340.0,
             "gate_panel"
         )
+        debris.bind_surface_state(
+            MaterialResponse.adopt_fragment(debris, panel_state, 0.4)
+        )
         var velocity_net: Vector3 = spec.get(
             "linear_velocity",
             Vector3.ZERO
@@ -383,26 +416,6 @@ func _break_panel(index: int, direction: Vector3) -> void:
 
     panel_health[index] = 0.0
     breached = true
-    MaterialFx.steel(
-        get_parent(),
-        break_pos,
-        direction + Vector3.UP * 0.18,
-        clampf(event_energy / 2600.0, 3.0, 7.0)
-    )
-    get_tree().call_group(
-        "physical_event_listener",
-        "physical_event",
-        {
-            "type": "fracture",
-            "position": break_pos,
-            "impulse": sqrt(2.0 * 310.0 * event_energy),
-            "mass": 310.0,
-            "fracture": 1.0,
-            "radius": PANEL_SIZE,
-            "novelty": 1.0,
-            "material": "steel"
-        }
-    )
 
 func apply_world_loads(loads: Array, delta: float) -> void:
     if breached:
@@ -443,18 +456,18 @@ func apply_world_loads(loads: Array, delta: float) -> void:
                 var panel := panels[panel_index]
                 if is_instance_valid(panel):
                     var panel_local := panel.to_local(body.global_position)
+                    # Quasi-static live load is weight, not velocity: a
+                    # resting mass presses the panel out of plane under
+                    # its own weight (elite spec f_live = m(g + a); a is
+                    # not tracked here, so this is the g-only quasi-static
+                    # term). Real impacts pay through apply_impact instead.
                     panel_networks[panel_index].apply_force(
                         Vector3(
                             panel_local.x,
                             0.0,
                             panel_local.y
                         ),
-                        Vector3(
-                            body.linear_velocity.x * body_mass * 3.0,
-                            body.linear_velocity.z * body_mass * 3.0,
-                            body.linear_velocity.y * body_mass * 3.0
-                            - body_mass * 9.81
-                        )
+                        Vector3(0.0, 0.0, -body_mass * 9.81)
                     )
 
     for i in panel_networks.size():
@@ -520,27 +533,3 @@ func get_load_path_state() -> Dictionary:
         "breached": breached
     }
 
-func _emit_impact_event(
-        world_point: Vector3,
-        impulse: float,
-        energy: float,
-        broken_fraction: float
-) -> void:
-    get_tree().call_group(
-        "physical_event_listener",
-        "physical_event",
-        {
-            "type": "machine_contact",
-            "position": world_point,
-            "impulse": impulse,
-            "mass": 310.0,
-            "fracture": clampf(
-                broken_fraction * 2.5 + energy / 22000.0,
-                0.0,
-                1.0
-            ),
-            "radius": maxf(CELL_SIZE, sqrt(energy) * 0.015),
-            "novelty": clampf(0.58 + energy / 18000.0, 0.58, 1.0),
-            "material": "steel"
-        }
-    )

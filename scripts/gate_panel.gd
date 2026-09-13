@@ -56,19 +56,19 @@ func _infer_machine_contact_point() -> Vector3:
     return to_global(local)
 
 func _infer_impact_energy(amount: float) -> float:
-    var energy := amount * amount * 3.2
+    var force := 0.0
+    var effort := 0.0
+    var held_mass := 0.0
     for machine in get_tree().get_nodes_in_group("machine"):
         if not is_instance_valid(machine):
             continue
         if not machine.has_method("get_sustained_contact_state"):
             continue
         var state: Dictionary = machine.get_sustained_contact_state()
-        var force := maxf(float(state.get("force", 0.0)), amount)
-        var effort := clampf(float(state.get("effort", 0.0)), 0.0, 1.0)
-        var held_mass := maxf(float(state.get("held_mass", 0.0)), 0.0)
-        energy = maxf(
-            energy,
-            force * force * (0.34 + effort * 0.72)
-            * (1.0 + held_mass / 620.0)
-        )
-    return energy
+        force = maxf(force, float(state.get("force", 0.0)))
+        effort = maxf(effort, float(state.get("effort", 0.0)))
+        held_mass = maxf(held_mass, float(state.get("held_mass", 0.0)))
+    return (
+        EnergyPartition.nominal_impact_energy(amount, force, effort)
+        * (1.0 + held_mass / 620.0)
+    )
