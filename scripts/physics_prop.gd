@@ -43,6 +43,9 @@ func launch(throw_velocity: Vector3, source: Node = null) -> void:
     _flight_time = 2.4
     contact_monitor = true
     max_contacts_reported = 4
+    # A thrown crate crosses a thin gate panel in under one tick at throw
+    # speed; CCD is the cheap fix, paid only while actually in flight.
+    continuous_cd = true
     if not body_entered.is_connected(_on_flight_contact):
         body_entered.connect(_on_flight_contact)
     set_physics_process(true)
@@ -105,6 +108,7 @@ func _end_flight() -> void:
     _flight_time = 0.0
     _flight_source = null
     contact_monitor = false
+    continuous_cd = false
     set_physics_process(false)
 
 func configure_box(size: Vector3, color: Color, mass_value: float = 75.0, hp: float = 80.0) -> void:

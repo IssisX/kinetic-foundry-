@@ -29,6 +29,10 @@ func _ready() -> void:
     collision_layer = 8
     collision_mask = 1 | 2 | 4 | 8
     can_sleep = true
+    # A fragment is fastest in the instant it is released from a fracture -
+    # exactly when it is most likely to cross a thin gate panel or deck
+    # skin in under one tick. CCD costs nothing once the body sleeps.
+    continuous_cd = true
 
 func configure(
         size: Vector3,
