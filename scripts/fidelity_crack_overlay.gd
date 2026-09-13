@@ -1,9 +1,9 @@
 class_name FidelityCrackOverlay3D
 extends MeshInstance3D
 
-## Read-only crack projection. It consumes the same fracture-network bond and
-## node state as DeformationSkin3D; fidelity changes only which legitimate
-## cracks are resolved, never the underlying damage result.
+## Read-only crack projection from the same bonds as the fracture solver. F2+
+## also resolves tensile constraint/opening, so cracks widen because the solved
+## plate is separating rather than because a cosmetic timer advanced.
 
 var _seen_revision := -1
 var _seen_fidelity := -1
@@ -41,9 +41,22 @@ func _rebuild(network, plane_mode: int) -> void:
     var vertices := PackedVector3Array()
     var colors := PackedColorArray()
     var indices := PackedInt32Array()
+    var total_mass := maxf(float(network.get("total_mass")), 0.1)
     for bond in network.get_bond_visuals():
         var damage := float(bond.damage)
-        if bool(bond.active) and damage < threshold:
+        var opening := float(bond.get("opening", 0.0))
+        var lambda_mag := float(bond.get("lambda", 0.0))
+        var lambda_signal := clampf(
+            1.0 - exp(-lambda_mag / maxf(total_mass * 0.002, 0.001)),
+            0.0,
+            1.0
+        )
+        var tensile_visible := (
+            Fidelity.f >= 2
+            and opening > 0.0015
+            and lambda_signal > 0.035
+        )
+        if bool(bond.active) and damage < threshold and not tensile_visible:
             continue
         var first := _map_position(
             network.get_node_position(int(bond.a)),
@@ -67,9 +80,14 @@ func _rebuild(network, plane_mode: int) -> void:
             crack_axis = Vector3.RIGHT
         var midpoint := (first + second) * 0.5 + normal * 0.020
         var half_length := first.distance_to(second) * (
-            0.16 + damage * 0.18
+            0.16 + damage * 0.18 + lambda_signal * 0.08
         )
-        var half_width := 0.010 + damage * 0.022
+        var half_width := (
+            0.010
+            + damage * 0.022
+            + minf(opening * 0.40, 0.055)
+            + lambda_signal * 0.018
+        )
         var base := vertices.size()
         vertices.append(midpoint - crack_axis * half_length - tangent * half_width)
         vertices.append(midpoint + crack_axis * half_length - tangent * half_width)
@@ -77,9 +95,10 @@ func _rebuild(network, plane_mode: int) -> void:
         vertices.append(midpoint - crack_axis * half_length + tangent * half_width)
         for local_index in [0, 1, 2, 0, 2, 3]:
             indices.append(base + local_index)
+        var signal := maxf(damage, lambda_signal)
         var color := Color(0.11, 0.025, 0.008).lerp(
             Color(1.0, 0.19, 0.018),
-            damage * 0.48
+            signal * 0.48
         )
         for _i in 4:
             colors.append(color)
