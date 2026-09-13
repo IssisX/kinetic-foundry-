@@ -15,7 +15,7 @@ jobs:
   capture:
     if: ${{ !contains(github.event.head_commit.message, '[skip capture]') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 5
     name: Render deterministic screenshots
 
     env:
@@ -70,7 +70,7 @@ jobs:
           rm -rf "$CAPTURE_DIR"
           mkdir -p "$CAPTURE_DIR"
           set +e
-          timeout --signal=TERM 58s xvfb-run -a -s "-screen 0 1800x1500x24" \
+          timeout --signal=TERM 90s xvfb-run -a -s "-screen 0 1800x1500x24" \
             "$GODOT_BIN" --path . --audio-driver Dummy 2>&1 | tee /tmp/kinetic-capture.log
           status=${PIPESTATUS[0]}
           set -e

@@ -39,10 +39,6 @@ func _ready() -> void:
     # exactly when it is most likely to cross a thin gate panel or deck
     # skin in under one tick. CCD costs nothing once the body sleeps.
     continuous_cd = true
-    contact_monitor = true
-    max_contacts_reported = 8
-    if not body_entered.is_connected(_on_live_contact):
-        body_entered.connect(_on_live_contact)
     set_physics_process(true)
 
 func configure(
@@ -267,6 +263,10 @@ func _physics_process(delta: float) -> void:
         sleeping = false
         can_sleep = false
         continuous_cd = true
+        contact_monitor = true
+        max_contacts_reported = 8
+        if not body_entered.is_connected(_on_live_contact):
+            body_entered.connect(_on_live_contact)
     elif speed < 0.55 and not machine_held:
         continuous_cd = false
         can_sleep = true
@@ -274,6 +274,8 @@ func _physics_process(delta: float) -> void:
 
 func _on_live_contact(body: Node) -> void:
     if _fracturing or body == null or body == self:
+        return
+    if not is_inside_tree():
         return
     if held and not machine_held:
         return
@@ -284,6 +286,13 @@ func _on_live_contact(body: Node) -> void:
     var relative := linear_velocity.length()
     if body is RigidBody3D:
         relative = (linear_velocity - (body as RigidBody3D).linear_velocity).length()
+    if (
+        body is StaticBody3D
+        and not body.has_method("machine_hit")
+        and not body.has_method("machine_hit_at")
+        and relative < 6.5
+    ):
+        return
     if relative < 2.15:
         return
     var direction := (

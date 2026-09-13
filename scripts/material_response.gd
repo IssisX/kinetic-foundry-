@@ -38,6 +38,7 @@ var _live_fx := 0
 var _events_this_second := 0
 var _event_clock := 0.0
 var _event_rate := 0.0
+var _emitting := false
 
 
 func _ready() -> void:
@@ -646,6 +647,9 @@ func _emit(
         consequence: Dictionary,
         options: Dictionary
 ) -> void:
+    if _emitting:
+        return
+    _emitting = true
     var material_id := FoundryMaterial.STRUCTURAL_STEEL
     if state != null:
         material_id = state.material_id
@@ -676,6 +680,7 @@ func _emit(
             "ring": float(consequence.get("ring", 0.6))
         }
     )
+    _emitting = false
 
 
 func _fx_parent(target: Object) -> Node:

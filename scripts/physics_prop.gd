@@ -88,6 +88,8 @@ func _arm_contact_sense() -> void:
 func _on_live_contact(body: Node) -> void:
     if destroyed or body == null or body == self or body == _flight_source:
         return
+    if not is_inside_tree():
+        return
     if held and not machine_held:
         return
     if machine_held and body.is_in_group("machine"):
@@ -98,6 +100,17 @@ func _on_live_contact(body: Node) -> void:
     var relative := linear_velocity.length()
     if body is RigidBody3D:
         relative = (linear_velocity - (body as RigidBody3D).linear_velocity).length()
+    # Yard pads and walls are StaticBody3D without a hit method. Settling
+    # onto them is not a smash; dropping a beam at demolition speed is.
+    if (
+        body is StaticBody3D
+        and not body.has_method("machine_hit")
+        and not body.has_method("machine_hit_at")
+        and relative < 6.5
+    ):
+        if _flight_time > 0.0:
+            _end_flight()
+        return
     if relative < CONTACT_SPEED:
         if _flight_time > 0.0:
             _end_flight()
@@ -378,6 +391,7 @@ func _spawn_fragments(direction: Vector3) -> void:
     )
     for i in fragment_count:
         var piece := PhysicsProp.new()
+        parent.add_child(piece)
         piece.global_position = global_position + Vector3(
             (float(i % 2) - 0.5) * source_size.x * 0.35,
             0.18 + float(i % 3) * 0.10,
@@ -389,7 +403,6 @@ func _spawn_fragments(direction: Vector3) -> void:
             maxf(0.16, source_size.y * 0.26),
             maxf(0.18, source_size.z * (0.34 if barrel_shape else 0.42))
         )
-        parent.add_child(piece)
         piece.configure_box(
             chunk_size,
             source_color.darkened(0.10 + float(i) * 0.025),
