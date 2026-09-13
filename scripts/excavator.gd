@@ -185,7 +185,7 @@ func _player_control(delta: float) -> void:
     var track_ratio := maxf(get_track_ratio(), 0.18)
     var hydraulic_ratio := maxf(get_hydraulic_ratio(), 0.22)
     hydraulic_ratio *= 1.0 - _load_path_resistance * 0.18
-    var axis: Vector2 = hud.move_axis
+    var axis: Vector2 = control_axis()
     var throttle: float = -axis.y
     var steering: float = axis.x
     var forward: Vector3 = -global_basis.z

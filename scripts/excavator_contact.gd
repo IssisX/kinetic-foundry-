@@ -267,7 +267,7 @@ func _player_control(delta: float) -> void:
         (1.0 - _load_path_resistance * 0.42)
         * stability_authority
     )
-    var axis: Vector2 = hud.move_axis
+    var axis: Vector2 = control_axis()
     var throttle: float = -axis.y
     var steering: float = axis.x
     var forward: Vector3 = -global_basis.z

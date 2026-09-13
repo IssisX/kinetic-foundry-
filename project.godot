@@ -9,6 +9,7 @@ config/features=PackedStringArray("4.3", "GL Compatibility")
 
 [autoload]
 ClassCatalog="*res://scripts/class_catalog.gd"
+GameOptions="*res://scripts/game_options.gd"
 Fidelity="*res://scripts/fidelity.gd"
 MaterialResponse="*res://scripts/material_response.gd"
 WorldExtension="*res://scripts/world_extension.gd"

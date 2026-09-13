@@ -4,6 +4,8 @@ render_mode cull_disabled, depth_draw_opaque, specular_schlick_ggx;
 // Every field below is produced by a solver or by surface history.
 // COLOR.r = node damage D, COLOR.g = tensile strain heat, COLOR.b = |lambda|
 // as a fraction of node weight. The uniforms are the body-wide surface state.
+// stress_overlay / deform_scale / damage_overlay are view-law knobs: they
+// hide or show solver state. They do not change the lattice.
 
 uniform vec4 base_color : source_color = vec4(0.31, 0.32, 0.30, 1.0);
 uniform vec4 substrate_color : source_color = vec4(0.34, 0.35, 0.33, 1.0);
@@ -24,6 +26,9 @@ uniform float shimmer_m = 0.0;
 uniform vec3 impact_local = vec3(0.0);
 uniform float impact_radius = 0.0;
 uniform float impact_depth = 0.0;
+uniform float stress_overlay : hint_range(0.0, 1.0) = 1.0;
+uniform float deform_scale : hint_range(0.0, 1.0) = 1.0;
+uniform float damage_overlay : hint_range(0.0, 1.0) = 1.0;
 
 varying vec4 v_solver;
 varying float v_crater;
@@ -33,7 +38,7 @@ varying float v_ao;
 void vertex() {
 	v_solver = COLOR;
 	v_wave = clamp(COLOR.a, 0.0, 1.0);
-	float d = clamp(COLOR.r, 0.0, 1.0);
+	float d = clamp(COLOR.r, 0.0, 1.0) * damage_overlay;
 	float crater = 0.0;
 	if (impact_radius > 0.001) {
 		float q = length(VERTEX - impact_local) / impact_radius;
@@ -43,7 +48,8 @@ void vertex() {
 		}
 	}
 	v_crater = crater;
-	VERTEX += NORMAL * (shimmer_m - crack_depth * d * d - impact_depth * crater + v_wave * 0.012);
+	float disp = shimmer_m - crack_depth * d * d - impact_depth * crater + v_wave * 0.012;
+	VERTEX += NORMAL * disp * deform_scale;
 
 	vec3 world_n = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
 	vec3 world_p = (MODEL_MATRIX * vec4(VERTEX, 1.0)).xyz;
@@ -54,7 +60,7 @@ void vertex() {
 }
 
 void fragment() {
-	float d = clamp(v_solver.r, 0.0, 1.0);
+	float d = clamp(v_solver.r, 0.0, 1.0) * damage_overlay;
 	float heat = clamp(v_solver.g, 0.0, 1.0);
 	float load = clamp(v_solver.b, 0.0, 1.0);
 	float wave = clamp(v_wave, 0.0, 1.0);
@@ -75,8 +81,13 @@ void fragment() {
 	albedo *= 1.0 - 0.16 * v_crater;
 	albedo *= 1.0 + 0.22 * wave;
 
-	float strain_glow = pow(heat, 4.0) * (0.35 + 0.65 * d);
-	float wave_glow = pow(wave, 1.6) * 0.85;
+	float load_vis = smoothstep(0.10, 0.62, load) * stress_overlay;
+	vec3 load_tint = mix(vec3(0.10, 0.30, 0.52), vec3(0.90, 0.24, 0.05), clamp(load, 0.0, 1.0));
+	albedo = mix(albedo, load_tint, load_vis * 0.48);
+
+	float strain_glow = pow(heat, 4.0) * (0.35 + 0.65 * d) * stress_overlay;
+	float wave_glow = pow(wave, 1.6) * 0.85 * stress_overlay;
+	float load_glow = load_vis * load * 0.55;
 
 	ALBEDO = albedo;
 	METALLIC = clamp(
@@ -85,11 +96,11 @@ void fragment() {
 		1.0
 	);
 	ROUGHNESS = clamp(
-		roughness_base + d * 0.22 + oxidation_level * 0.18 - load * 0.05 - film_gloss * 0.55 - wave * 0.12,
+		roughness_base + d * 0.22 + oxidation_level * 0.18 - load * 0.05 * stress_overlay - film_gloss * 0.55 - wave * 0.12,
 		0.05,
 		0.99
 	);
-	EMISSION = heat_color.rgb * (strain_glow + thermal_emission + wave_glow);
+	EMISSION = heat_color.rgb * (strain_glow + thermal_emission + wave_glow) + load_tint * load_glow;
 	AO = v_ao;
 	AO_LIGHT_AFFECT = 0.22;
 }

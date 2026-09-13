@@ -58,6 +58,13 @@ func _run() -> void:
     _capture("09_crane_suspended_load.png")
 
     get_tree().paused = false
+    _stage_dozer_blade_push()
+    await _settle_physics_frames(36)
+    await _settle_frames(4)
+    get_tree().paused = true
+    _capture("10_dozer_blade_push.png")
+
+    get_tree().paused = false
     var gait_ok: bool = await _stage_gait_observables()
     if not gait_ok:
         get_tree().quit(4)
@@ -71,6 +78,10 @@ func _freeze_gameplay() -> void:
         game.player.process_mode = Node.PROCESS_MODE_DISABLED
     if game.excavator != null:
         game.excavator.process_mode = Node.PROCESS_MODE_DISABLED
+    if game.dozer != null:
+        game.dozer.process_mode = Node.PROCESS_MODE_DISABLED
+    if game.crane != null:
+        game.crane.process_mode = Node.PROCESS_MODE_DISABLED
     if game.mission != null:
         game.mission.process_mode = Node.PROCESS_MODE_DISABLED
     for enemy in get_tree().get_nodes_in_group("enemy"):
@@ -85,6 +96,15 @@ func _stage_yard_overview() -> void:
     game.player.global_position = Vector3(-6.0, 0.03, 10.0)
     game.excavator.global_position = Vector3(3.5, -0.17, 1.0)
     game.excavator.rotation.y = 0.34
+    if game.dozer != null:
+        game.dozer.visible = true
+        game.dozer.global_position = Vector3(11.6, -0.12, 7.4)
+        game.dozer.rotation.y = -0.72
+        game.dozer.blade_lift = 0.10
+        game.dozer.blade_tilt = 0.06
+        game.dozer._apply_pose()
+    if game.crane != null:
+        game.crane.visible = true
     game.mission.stage = 0
     _clear_machine_hud()
     game.hud.set_health(0.92)
@@ -254,6 +274,10 @@ func _stage_breach_gate() -> void:
 func _stage_gait_observables() -> bool:
     _show_all_enemies(false)
     game.excavator.visible = false
+    if game.dozer != null:
+        game.dozer.visible = false
+    if game.crane != null:
+        game.crane.visible = false
     game.player.visible = true
     game.player.global_position = Vector3(-1.2, 0.03, 13.5)
     game.player.rotation = Vector3.ZERO
@@ -413,6 +437,70 @@ func _stage_crane_load_swing() -> void:
     _camera(Vector3(9.0, 11.0, 26.5), Vector3(-8.0, 5.2, 8.5), 55.0)
 
 
+func _stage_dozer_blade_push() -> void:
+    game.player.visible = false
+    _show_all_enemies(false)
+    _release_capture_load()
+    if game.crane != null and game.crane.has_method("drop_load") and game.crane.is_holding_load():
+        game.crane.drop_load()
+    if game.excavator != null:
+        game.excavator.visible = true
+    var dozer = game.dozer
+    if dozer == null:
+        return
+    dozer.visible = true
+    dozer.global_position = Vector3(12.4, -0.12, 7.1)
+    dozer.rotation.y = 0.32
+    dozer.blade_lift = 0.05
+    dozer.blade_tilt = 0.10
+    dozer.ripper_drop = 0.15
+    dozer.force_update_transform()
+    dozer._apply_pose()
+    var forward: Vector3 = -dozer.global_basis.z
+    var right: Vector3 = dozer.global_basis.x
+    var blade: Vector3 = dozer._blade_point
+    var offsets := [
+        Vector3(0.0, 0.12, 0.0),
+        Vector3(1.05, 0.08, 0.15),
+        Vector3(-0.95, 0.10, 0.20),
+        Vector3(0.45, 0.22, -0.55),
+        Vector3(-0.40, 0.18, -0.70)
+    ]
+    var shove: Vector3 = forward * 2.2
+    var index := 0
+    for prop in get_tree().get_nodes_in_group("physics_prop"):
+        if index >= offsets.size():
+            break
+        if not is_instance_valid(prop):
+            continue
+        if float(prop.get("mass")) > 200.0:
+            continue
+        var lateral: Vector3 = right * offsets[index].x + Vector3.UP * offsets[index].y + forward * (0.95 + offsets[index].z)
+        prop.global_position = blade + lateral
+        prop.linear_velocity = shove
+        prop.angular_velocity = Vector3(0.4, 0.8, 0.2)
+        prop.sleeping = false
+        index += 1
+    if game.hud.has_method("set_machine_profile"):
+        game.hud.set_machine_profile(dozer.get_control_profile())
+    else:
+        game.hud.set_machine_mode(true)
+    game.hud.set_health(0.90)
+    game.hud.set_target(null)
+    game.hud.set_objective(
+        "SHOVE THE YARD",
+        "9.8 TONNES ON TRACKS // THE BLADE IS A WALL"
+    )
+    game.hud.set_objective_progress(0.42)
+    game.hud.set_machine_telemetry(0.92, 0.86, 0.94, 0.82, false)
+    game.hud.set_context("BLADE CONTACT // MASS IS THE TOOL")
+    _camera(
+        blade + Vector3(5.6, 3.4, 4.8),
+        blade + Vector3(-0.2, 0.35, 0.2),
+        46.0
+    )
+
+
 func _set_machine_hud() -> void:
     if game.hud.has_method("set_machine_profile") and game.excavator.has_method("get_control_profile"):
         game.hud.set_machine_profile(game.excavator.get_control_profile())
@@ -456,7 +544,14 @@ func _heaviest_prop():
 
 func _show_all_enemies(value: bool) -> void:
     for enemy in get_tree().get_nodes_in_group("enemy"):
-        enemy.visible = value and enemy != game.excavator.enemy_driver
+        var occupied := false
+        if game.excavator != null and enemy == game.excavator.enemy_driver:
+            occupied = true
+        if game.dozer != null and enemy == game.dozer.enemy_driver:
+            occupied = true
+        if game.crane != null and enemy == game.crane.enemy_driver:
+            occupied = true
+        enemy.visible = value and not occupied
 
 func _visible_enemies() -> Array[Node]:
     var result: Array[Node] = []

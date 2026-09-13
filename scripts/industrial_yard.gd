@@ -383,6 +383,10 @@ func _build_loose_props() -> void:
     _spawn_barrel(Vector3(-2.2, 0.60, -9.8), Color(0.34, 0.30, 0.12))
     _spawn_barrel(Vector3(9.0, 0.60, 4.5), Color(0.42, 0.18, 0.06))
     _spawn_barrel(Vector3(9.8, 0.60, 5.0), Color(0.16, 0.30, 0.31))
+    _spawn_barrel(Vector3(15.1, 0.60, 5.35), Color(0.42, 0.18, 0.06))
+    _spawn_barrel(Vector3(16.0, 0.60, 5.70), Color(0.16, 0.30, 0.31))
+    _spawn_barrel(Vector3(14.55, 0.60, 5.90), Color(0.34, 0.30, 0.12))
+    _spawn_barrel(Vector3(15.55, 0.60, 4.85), Color(0.20, 0.22, 0.21))
 
     _spawn_box_prop(Vector3(-10.5, 0.55, 5.0), Vector3(1.1, 1.1, 1.1), Color(0.25, 0.19, 0.10), 55.0)
     _spawn_box_prop(Vector3(-9.1, 0.42, 5.2), Vector3(0.84, 0.84, 0.84), Color(0.23, 0.17, 0.09), 38.0)
@@ -406,6 +410,18 @@ func _build_loose_props() -> void:
         Vector3(1.85, 0.22, 1.25),
         Color(0.22, 0.23, 0.22),
         310.0
+    )
+    _spawn_box_prop(
+        Vector3(15.7, 0.38, 4.55),
+        Vector3(1.55, 0.42, 0.95),
+        Color(0.24, 0.25, 0.23),
+        140.0
+    )
+    _spawn_box_prop(
+        Vector3(14.6, 0.28, 4.15),
+        Vector3(1.85, 0.28, 1.05),
+        Color(0.22, 0.23, 0.21),
+        175.0
     )
 
 func _spawn_barrel(pos: Vector3, color: Color) -> void:

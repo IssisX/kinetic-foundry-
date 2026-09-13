@@ -240,7 +240,7 @@ func _player_control(delta: float) -> void:
     # A crane close to tipping does not get to swing faster.
     var authority := clampf(1.0 - maxf(_tipping_ratio - 0.55, 0.0) * 0.85, 0.30, 1.0)
 
-    var axis: Vector2 = hud.move_axis
+    var axis: Vector2 = control_axis()
     var forward := -global_basis.z
     var throttle := -axis.y
     velocity.x = forward.x * throttle * drive_speed * authority

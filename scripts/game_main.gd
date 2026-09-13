@@ -4,6 +4,8 @@ const PlayerScene = preload("res://scripts/player.gd")
 const EnemyScene = preload("res://scripts/enemy.gd")
 const ExcavatorScene = preload("res://scripts/excavator_contact.gd")
 const CraneScene = preload("res://scripts/crane.gd")
+const DozerScene = preload("res://scripts/dozer.gd")
+const MenuScene = preload("res://scripts/foundry_menu.gd")
 const StructureScene = preload("res://scripts/structure_material.gd")
 const CameraRigScene = preload("res://scripts/camera_rig.gd")
 const HudScene = preload("res://scripts/machine_hud.gd")
@@ -23,6 +25,8 @@ var camera_rig
 var player
 var excavator
 var crane
+var dozer
+var menu
 var structure
 var yard
 var facility_expansion
@@ -51,6 +55,10 @@ func _ready() -> void:
         var enemy_check := EnemyCheckScene.new()
         add_child(enemy_check)
         enemy_check.begin(self)
+    else:
+        menu = MenuScene.new()
+        add_child(menu)
+        menu.begin(self)
 
 func _process(delta: float) -> void:
     if OS.get_environment("KF_CAPTURE") == "1":
@@ -157,8 +165,19 @@ func _build_gameplay() -> void:
     crane.player_exited.connect(_on_machine_exited)
     crane.machine_disabled.connect(_on_machine_disabled)
 
+    dozer = DozerScene.new()
+    dozer.position = Vector3(15.5, -0.12, 8.5)
+    dozer.rotation.y = 0.18
+    add_child(dozer)
+    dozer.configure(hud, camera_rig)
+    dozer.player_entered.connect(_on_machine_entered)
+    dozer.player_exited.connect(_on_machine_exited)
+    dozer.machine_disabled.connect(_on_machine_disabled)
+
     var operator = _spawn_enemy(Vector3(4.0, 0.03, -3.0), EnemyScene.RIGGER)
     excavator.set_enemy_driver(operator)
+    var dozer_op = _spawn_enemy(Vector3(15.5, 0.03, 8.5), EnemyScene.RIGGER)
+    dozer.set_enemy_driver(dozer_op)
     _spawn_enemy(Vector3(-3.0, 0.03, 5.0), EnemyScene.GRUNT)
     _spawn_enemy(Vector3(1.0, 0.03, 10.0), EnemyScene.PLATE)
     _spawn_enemy(Vector3(8.0, 0.03, 7.0), EnemyScene.THROWER)
@@ -281,13 +300,15 @@ func _update_interaction_prompt() -> void:
 
     var target = _nearest_machine(player.global_position)
     if target == null:
-        if excavator != null and excavator.disabled:
+        for machine in get_tree().get_nodes_in_group("machine"):
+            if not is_instance_valid(machine) or not machine.disabled:
+                continue
             var wreck_distance: float = player.global_position.distance_to(
-                excavator.global_position
+                machine.global_position
             )
             if wreck_distance < 6.5:
                 hud.set_interaction_hint(
-                    "EXCAVATOR DISABLED // WRECKAGE REMAINS PHYSICAL"
+                    "%s DISABLED // WRECKAGE REMAINS PHYSICAL" % machine.machine_name()
                 )
                 return
         hud.set_interaction_hint("")

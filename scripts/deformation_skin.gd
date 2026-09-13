@@ -77,6 +77,9 @@ func configure(
         BaseMaterial3D.SHADING_MODE_UNSHADED
     )
     _cracks.material_override = _crack_material
+    if not GameOptions.changed.is_connected(_on_view_law_changed):
+        GameOptions.changed.connect(_on_view_law_changed)
+    _push_option_uniforms()
     refresh(true)
 
 
@@ -95,11 +98,28 @@ func bind_resonance_source(body: Object) -> void:
     resonance_source = body
 
 
+func _on_view_law_changed() -> void:
+    _push_option_uniforms()
+    if _cracks != null:
+        _cracks.visible = GameOptions.damage_visible
+
+
+func _push_option_uniforms() -> void:
+    if _surface_material == null:
+        return
+    _surface_material.set_shader_parameter("stress_overlay", GameOptions.stress_amount())
+    _surface_material.set_shader_parameter("deform_scale", GameOptions.deform_scale())
+    _surface_material.set_shader_parameter("damage_overlay", GameOptions.damage_amount())
+    if _cracks != null:
+        _cracks.visible = GameOptions.damage_visible
+
+
 func refresh(force: bool = false) -> void:
     if network == null or _surface == null:
         return
     _push_surface_uniforms()
     _push_resonance_uniform()
+    _push_option_uniforms()
     var revision: int = network.get_revision()
     var wave_live := false
     if network.has_method("get_wave_peak"):

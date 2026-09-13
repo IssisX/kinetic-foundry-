@@ -51,6 +51,26 @@ func configure(controls, camera) -> void:
     camera_rig = camera
 
 
+## Locomotion stick. Touch owns the HUD axis; keyboard fills in when
+## the stick is idle so a desktop session can still drive. A is left,
+## D is right: yaw += -axis.x, forward is -Z.
+func control_axis() -> Vector2:
+    var axis := Vector2.ZERO
+    if hud != null:
+        axis = hud.move_axis
+    if axis.length_squared() < 0.002:
+        if Input.is_physical_key_pressed(KEY_D) or Input.is_physical_key_pressed(KEY_RIGHT):
+            axis.x += 1.0
+        if Input.is_physical_key_pressed(KEY_A) or Input.is_physical_key_pressed(KEY_LEFT):
+            axis.x -= 1.0
+        if Input.is_physical_key_pressed(KEY_W) or Input.is_physical_key_pressed(KEY_UP):
+            axis.y -= 1.0
+        if Input.is_physical_key_pressed(KEY_S) or Input.is_physical_key_pressed(KEY_DOWN):
+            axis.y += 1.0
+        axis = axis.limit_length(1.0)
+    return axis
+
+
 ## Readable name for prompts and machine telemetry.
 func machine_name() -> String:
     return "MACHINE"

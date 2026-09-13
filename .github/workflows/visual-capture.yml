@@ -98,6 +98,7 @@ jobs:
             07_walk_single_support.png
             08_walk_double_support.png
             09_crane_suspended_load.png
+            10_dozer_blade_push.png
           )
           for name in "${expected[@]}"; do
             file="$CAPTURE_DIR/$name"
