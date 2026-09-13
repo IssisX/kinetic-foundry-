@@ -15,6 +15,18 @@ const STIFFNESS_TO_COMPLIANCE := 280.0
 ## constraint impulse estimate that fracture, audio and admittance read.
 const WARM_START_RETENTION := 0.6
 
+## _residual_energy is spare energy banked from past hits, awaiting a
+## fracture event that can spend it as extra fragment velocity. Nothing
+## drained it before now: a structure absorbing many small hits without
+## ever breaking could bank an unbounded amount, then release all of it
+## at once on whatever hit finally cracked it - a single joule-accurate
+## impact producing a burst disproportionate to that impact. Real spare
+## energy leaks away as heat and sound; this does too, and is hard-capped
+## so a burst of hits in one tick cannot bank past what one severe impact
+## would deliver.
+const RESIDUAL_DECAY_PER_SECOND := 0.35
+const RESIDUAL_ENERGY_CEILING := 60000.0
+
 var columns := 0
 var rows := 0
 var span := Vector3.ONE
@@ -276,7 +288,10 @@ func apply_impact(
         bond.damage = maxf(float(bond.damage), work_damage)
         if float(bond.damage) >= 1.0:
             _break_bond(bond)
-    _residual_energy += energy * 0.26
+    _residual_energy = minf(
+        _residual_energy + energy * 0.26,
+        RESIDUAL_ENERGY_CEILING
+    )
     _revision += 1
     _refresh_topology()
     return get_energy_state()
@@ -312,6 +327,7 @@ func step(delta: float) -> void:
     var substeps := clampi(ceili(safe_delta / 0.016), 1, 8)
     var sub_delta := safe_delta / float(substeps)
     _last_substep_delta = sub_delta
+    _residual_energy *= exp(-RESIDUAL_DECAY_PER_SECOND * safe_delta)
     for bond in _bonds:
         if bool(bond.active):
             bond.lambda = float(bond.lambda) * WARM_START_RETENTION
@@ -589,7 +605,10 @@ func fracture_by_energy(
             break
         desired -= 1
     if desired < 2:
-        _residual_energy += energy * 0.18
+        _residual_energy = minf(
+            _residual_energy + energy * 0.18,
+            RESIDUAL_ENERGY_CEILING
+        )
         return get_energy_state()
 
     for bond in _bonds:
@@ -600,9 +619,12 @@ func fracture_by_energy(
     _fracture_finalized = true
     for i in _pinned.size():
         _pinned[i] = false
-    _residual_energy += maxf(
-        0.0,
-        energy - boundary_cost - energy * 0.24
+    _residual_energy = minf(
+        _residual_energy + maxf(
+            0.0,
+            energy - boundary_cost - energy * 0.24
+        ),
+        RESIDUAL_ENERGY_CEILING
     )
     _refresh_topology()
     return get_energy_state()
