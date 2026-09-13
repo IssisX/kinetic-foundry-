@@ -1,25 +1,9 @@
 class_name Excavator
-extends CharacterBody3D
+extends FoundryMachine
 
 const GeomUtil = preload("res://scripts/geom.gd")
 const ImpactFx = preload("res://scripts/impact_fx.gd")
 const VisualBuilder = preload("res://scripts/excavator_visual.gd")
-
-const GRIP_TRAVEL_LIMIT := 3.75
-const GRIP_STIFFNESS := 78.0
-const GRIP_DAMPING := 17.5
-const GRIP_ALIGNMENT := 31.0
-const GRIP_MAX_ACCEL := 118.0
-const GRIP_MAX_TORQUE_PER_KG := 18.0
-
-signal player_entered(machine)
-signal player_exited(machine)
-signal machine_disabled(machine)
-
-var player_driver: Node3D
-var enemy_driver: Node3D
-var hud
-var camera_rig
 
 var drive_speed := 7.0
 var turn_speed := 1.15
@@ -29,11 +13,8 @@ var tool_angle := -0.18
 var arm_yaw := 0.0
 var ai_time := 0.0
 
-var chassis_health := 500.0
 var hydraulic_health := 260.0
 var track_health := 320.0
-var disabled := false
-var held_load
 
 var _boom: Node3D
 var _stick: Node3D
@@ -60,13 +41,9 @@ var _safe_boom_angle := -0.24
 var _safe_stick_angle := 0.42
 var _safe_tool_angle := -0.18
 var _safe_arm_yaw := 0.0
-var _hijack_candidate: Node3D
-var _hijack_timeout := 0.0
 
 func _ready() -> void:
-    add_to_group("machine")
-    collision_layer = 2
-    collision_mask = 1 | 4 | 8
+    super()
     var collision := GeomUtil.add_box_collision(self, Vector3(2.95, 1.45, 4.5))
     collision.position.y = 0.90
     var nodes := VisualBuilder.build(self)
@@ -83,25 +60,6 @@ func _ready() -> void:
             if shape is CollisionShape3D:
                 _arm_shapes.append(shape)
     _store_safe_arm_pose()
-
-func configure(controls, camera) -> void:
-    hud = controls
-    camera_rig = camera
-
-func set_enemy_driver(driver: Node3D) -> void:
-    enemy_driver = driver
-    if driver != null:
-        driver.visible = false
-        driver.process_mode = Node.PROCESS_MODE_DISABLED
-
-func is_player_driven() -> bool:
-    return player_driver != null
-
-func is_hijack_in_progress() -> bool:
-    return _hijack_candidate != null and is_instance_valid(_hijack_candidate) and _hijack_timeout > 0.0
-
-func get_health_ratio() -> float:
-    return clampf(chassis_health / 500.0, 0.0, 1.0)
 
 func get_hydraulic_ratio() -> float:
     return clampf(hydraulic_health / 260.0, 0.0, 1.0)
@@ -143,123 +101,58 @@ func set_load_path_feedback(state: Dictionary) -> void:
         1.0
     )
 
-func is_holding_load() -> bool:
-    return held_load != null and is_instance_valid(held_load)
-
-func request_hijack(player: Node3D) -> bool:
-    if disabled or player == null or player_driver != null:
+## Take a specific body into the grip. Public so that scripted setups use
+## the same force law the player's clamp does.
+func hold_load(body) -> bool:
+    if not _grip.grab(body, _grip_anchor):
         return false
-    var distance: float = global_position.distance_to(player.global_position)
-    if distance <= 3.5:
-        return try_enter(player)
-    var range_value = player.get("machine_climb_range")
-    var climb_range: float = float(range_value) if range_value != null else 5.8
-    if distance > climb_range or not player.has_method("begin_machine_climb"):
-        return false
-    _hijack_candidate = player
-    _hijack_timeout = 1.5
-    if hud != null:
-        hud.set_context("HIJACK // LATCHING ON // MACHINE CONTROL PENDING")
-    var started: bool = bool(player.begin_machine_climb(self))
-    if not started:
-        _hijack_candidate = null
-        _hijack_timeout = 0.0
-    return started
-
-func try_enter(player: Node3D) -> bool:
-    if disabled or player == null or player_driver != null:
-        return false
-    var latched: bool = _hijack_candidate == player or player.get("machine_climb_target") == self
-    if not latched and global_position.distance_to(player.global_position) > 3.5:
-        return false
-
-    if enemy_driver != null:
-        enemy_driver.visible = true
-        enemy_driver.process_mode = Node.PROCESS_MODE_INHERIT
-        enemy_driver.global_position = global_position + global_basis.x * 2.2 + Vector3.UP * 0.22
-        if enemy_driver.has_method("take_hit"):
-            enemy_driver.take_hit(global_basis.x * 8.0 + Vector3.UP * 2.5, 40.0)
-        enemy_driver = null
-
-    _hijack_candidate = null
-    _hijack_timeout = 0.0
-    player_driver = player
-    velocity.x = 0.0
-    velocity.z = 0.0
-    player.visible = false
-    player.process_mode = Node.PROCESS_MODE_DISABLED
-    if hud != null:
-        hud.set_machine_mode(true)
-        hud.set_context("CONTROL TRANSFERRED // EXCAVATOR ONLINE")
-    player_entered.emit(self)
+    held_load = body
+    _update_held_load()
     return true
 
-func exit_player() -> void:
-    if player_driver == null:
-        return
+func drop_load() -> void:
     _release_load(false)
-    var player := player_driver
-    player_driver = null
-    player.visible = true
-    player.process_mode = Node.PROCESS_MODE_INHERIT
-    player.global_position = global_position + global_basis.x * 2.8 + Vector3.UP * 0.22
-    if hud != null:
-        hud.set_machine_mode(false)
-        hud.set_context("POWER // COMBAT // MACHINES")
-    player_exited.emit(self)
 
-func receive_enemy_hit(damage: float) -> void:
-    _apply_machine_damage(damage, Vector3.UP)
-
-func receive_hazard_hit(damage: float, impulse: Vector3) -> void:
-    velocity += impulse * 0.22
-    _apply_machine_damage(damage * 0.72, impulse.normalized() if impulse.length_squared() > 0.01 else Vector3.UP)
-
-func machine_hit(
-        amount: float,
-        direction: Vector3,
-        _world_point: Vector3 = Vector3.ZERO
-) -> void:
-    velocity += direction.normalized() * minf(amount * 0.018, 3.8)
-    _apply_machine_damage(amount * 0.58, direction)
-
+## Which subsystem a hit ruins depends on where it landed: a side load
+## works the tracks, a vertical one works the hydraulics.
 func _apply_machine_damage(amount: float, direction: Vector3) -> void:
     if disabled:
         return
-    chassis_health = maxf(0.0, chassis_health - amount)
     var side_load := absf(direction.dot(global_basis.x))
     var vertical_load := absf(direction.y)
     track_health = maxf(0.0, track_health - amount * (0.18 + side_load * 0.36))
     hydraulic_health = maxf(0.0, hydraulic_health - amount * (0.12 + vertical_load * 0.28))
     _damage_fx_cooldown = 0.0
-    ImpactFx.spawn(get_parent(), global_position + Vector3.UP * 1.7, direction, Color(1.0, 0.48, 0.08), clampf(amount / 16.0, 0.8, 4.0), 10)
+    super(amount, direction)
     _refresh_damage_visuals()
-    if chassis_health <= 0.0:
-        disabled = true
-        _release_load(true)
-        velocity *= 0.2
-        if _work_light != null:
-            _work_light.light_energy = 0.0
-        machine_disabled.emit(self)
+
+func _disable_machine() -> void:
+    if disabled:
+        return
+    super()
+    if _work_light != null:
+        _work_light.light_energy = 0.0
 
 func _refresh_damage_visuals() -> void:
     if _engine_cover == null:
         return
-    var c := Color(0.68, 0.37, 0.045)
-    if get_health_ratio() < 0.65:
-        c = Color(0.55, 0.24, 0.035)
-    if get_health_ratio() < 0.32:
-        c = Color(0.28, 0.11, 0.025)
-    _engine_cover.material_override = GeomUtil.material(c, 0.78, 0.18)
+    var state := MaterialResponse.state_for(self, machine_material)
+    var surface := _engine_cover.material_override as StandardMaterial3D
+    if surface == null:
+        surface = GeomUtil.material(machine_tint, 0.78, 0.18)
+        _engine_cover.material_override = surface
+    if state != null:
+        state.apply_to_material(surface)
+    surface.albedo_color = surface.albedo_color.darkened(
+        (1.0 - get_health_ratio()) * 0.55
+    )
 
 func _physics_process(delta: float) -> void:
     _impact_cooldown = maxf(0.0, _impact_cooldown - delta)
     _damage_fx_cooldown = maxf(0.0, _damage_fx_cooldown - delta)
     _telemetry_timer = maxf(0.0, _telemetry_timer - delta)
     _arm_contact_cooldown = maxf(0.0, _arm_contact_cooldown - delta)
-    _hijack_timeout = maxf(0.0, _hijack_timeout - delta)
-    if _hijack_timeout <= 0.0:
-        _hijack_candidate = null
+    _tick_hijack(delta)
 
     if disabled:
         velocity.x = move_toward(velocity.x, 0.0, 7.0 * delta)
@@ -463,95 +356,30 @@ func _try_grip_load() -> bool:
             best = body
     if best == null:
         return false
+    if not _grip.grab(best, _grip_anchor):
+        return false
     held_load = best
-    held_load.global_position = _grip_anchor.global_position
-    held_load.global_basis = _grip_anchor.global_basis
-    _set_machine_hold(held_load, true)
     hud.set_context(
         "LOAD CLAMPED // MASS AMPLIFIES IMPACT + BRACING"
     )
     return true
 
 func _update_held_load(delta: float = 1.0 / 60.0) -> void:
-    if not is_holding_load():
-        held_load = null
-        _grip_force = Vector3.ZERO
-        _grip_stress = 0.0
-        return
-    if not (held_load is RigidBody3D):
-        _release_load(false)
-        return
-    var load: RigidBody3D = held_load
-    var displacement := _grip_anchor.global_position - load.global_position
-    if displacement.length() > GRIP_TRAVEL_LIMIT:
-        _set_machine_hold(load, false)
-        held_load = null
-        _grip_force = Vector3.ZERO
-        _grip_stress = 0.0
-        if hud != null:
-            hud.set_context("CLAMP SLIP // LOAD OUT OF TRAVEL")
-        return
-    var desired_velocity := _tool_tip_velocity
-    var relative_velocity := desired_velocity - load.linear_velocity
-    var grip_force := (
-        displacement * load.mass * GRIP_STIFFNESS
-        + relative_velocity * load.mass * GRIP_DAMPING
-    )
-    grip_force = _limit_grip_vector(
-        grip_force,
-        load.mass * GRIP_MAX_ACCEL
-    )
-    load.apply_central_force(grip_force)
-    var align_axis := load.global_basis.z.cross(
-        _grip_anchor.global_basis.z
-    )
-    var torque := (
-        align_axis * load.mass * GRIP_ALIGNMENT
-        - load.angular_velocity * load.mass * 4.5
-    )
-    load.apply_torque(_limit_grip_vector(
-        torque,
-        load.mass * GRIP_MAX_TORQUE_PER_KG
-    ))
-    _grip_force = grip_force
-    _grip_stress = clampf(
-        grip_force.length() / maxf(load.mass * GRIP_MAX_ACCEL, 1.0),
-        0.0,
-        1.0
-    )
-    var horizontal_reaction := Vector3(
-        grip_force.x,
-        0.0,
-        grip_force.z
-    )
-    velocity -= horizontal_reaction * (delta / 6200.0)
-
-func _limit_grip_vector(value: Vector3, max_length: float) -> Vector3:
-    if value.length_squared() <= max_length * max_length:
-        return value
-    return value.normalized() * max_length
-
-func _set_machine_hold(load, value: bool) -> void:
-    if load == null or not is_instance_valid(load):
-        return
-    if load.has_method("set_machine_held"):
-        load.set_machine_held(value)
-    elif load.has_method("set_held"):
-        load.set_held(value)
+    var reaction := _grip.update(_grip_anchor, _tool_tip_velocity)
+    held_load = _grip.held
+    _grip_force = _grip.force
+    _grip_stress = _grip.stress
+    if _grip.slipped and hud != null:
+        hud.set_context("CLAMP SLIP // LOAD OUT OF TRAVEL")
+    velocity -= reaction * (delta / 6200.0)
 
 func _release_load(with_throw: bool) -> void:
-    if not is_holding_load():
-        held_load = null
-        return
-    var load = held_load
+    var had_load := _grip.is_holding()
+    _grip.release(_tool_tip_velocity + velocity * 0.85, with_throw)
     held_load = null
-    _set_machine_hold(load, false)
     _grip_force = Vector3.ZERO
     _grip_stress = 0.0
-    if with_throw and load is RigidBody3D:
-        load.linear_velocity = _tool_tip_velocity + velocity * 0.85
-        load.angular_velocity = Vector3(_tool_tip_velocity.z, 0.8, -_tool_tip_velocity.x) * 0.16
-    if hud != null:
+    if had_load and hud != null:
         hud.set_context("DIRECT BOOM // PHYSICAL BUCKET // HYDRAULIC THUMB")
 
 func _resolve_tool_impacts() -> void:

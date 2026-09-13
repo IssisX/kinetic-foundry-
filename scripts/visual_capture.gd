@@ -43,6 +43,11 @@ func _run() -> void:
     await _settle_frames(8)
     _capture("06_breached_route.png")
 
+    _stage_crane_load_swing()
+    await _settle_physics_frames(46)
+    await _settle_frames(8)
+    _capture("09_crane_suspended_load.png")
+
     var gait_ok: bool = await _stage_gait_observables()
     if not gait_ok:
         get_tree().quit(4)
@@ -129,9 +134,7 @@ func _stage_excavator_operator_pov() -> void:
 
     var load = _first_prop()
     if load != null:
-        game.excavator.held_load = load
-        game.excavator._set_machine_hold(load, true)
-        game.excavator._update_held_load()
+        game.excavator.hold_load(load)
 
     game.mission.stage = 2
     if game.hud.has_method("set_machine_profile") and game.excavator.has_method("get_control_profile"):
@@ -314,6 +317,44 @@ func _gait_acceptance_passes(data: Dictionary) -> bool:
         )
     return valid
 
+func _stage_crane_load_swing() -> void:
+    game.player.visible = false
+    _show_all_enemies(false)
+    _release_capture_load()
+    var crane = game.crane
+    if crane == null:
+        return
+    crane.global_position = Vector3(-9.0, -0.10, 12.5)
+    crane.rotation.y = 0.0
+    crane.slew_angle = 0.40
+    crane.luff_angle = 0.70
+    crane.rope_length = 5.0
+    crane.force_update_transform()
+    crane._apply_upper_pose()
+    crane.place_hook(Vector3(1.9, 0.0, -1.2))
+
+    var load = _first_prop()
+    if load != null:
+        load.global_position = crane.get_hook_position()
+        load.linear_velocity = Vector3.ZERO
+        load.angular_velocity = Vector3.ZERO
+        crane.hold_load(load)
+
+    if game.hud.has_method("set_machine_profile"):
+        game.hud.set_machine_profile(crane.get_control_profile())
+    else:
+        game.hud.set_machine_mode(true)
+    game.hud.set_health(0.88)
+    game.hud.set_target(null)
+    game.hud.set_objective(
+        "WORK THE ROPE",
+        "SLEW // LUFF // HOIST // THE LOAD KEEPS ITS OWN MOMENTUM"
+    )
+    game.hud.set_objective_progress(0.55)
+    game.hud.set_context("SUSPENDED LOAD // RADIUS DRIVES TIPPING")
+    _camera(Vector3(9.0, 11.0, 26.5), Vector3(-8.0, 5.2, 8.5), 55.0)
+
+
 func _set_machine_hud() -> void:
     if game.hud.has_method("set_machine_profile") and game.excavator.has_method("get_control_profile"):
         game.hud.set_machine_profile(game.excavator.get_control_profile())
@@ -330,11 +371,10 @@ func _camera(position: Vector3, target: Vector3, fov: float) -> void:
     game.camera_rig.set_capture_pose(position, target, fov)
 
 func _release_capture_load() -> void:
-    if game.excavator.held_load == null or not is_instance_valid(game.excavator.held_load):
-        return
     var load = game.excavator.held_load
-    game.excavator.held_load = null
-    game.excavator._set_machine_hold(load, false)
+    if load == null or not is_instance_valid(load):
+        return
+    game.excavator.drop_load()
     load.linear_velocity = Vector3.ZERO
     load.angular_velocity = Vector3.ZERO
 

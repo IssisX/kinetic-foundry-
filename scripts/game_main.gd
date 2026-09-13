@@ -3,6 +3,7 @@ extends Node3D
 const PlayerScene = preload("res://scripts/player.gd")
 const EnemyScene = preload("res://scripts/enemy.gd")
 const ExcavatorScene = preload("res://scripts/excavator_contact.gd")
+const CraneScene = preload("res://scripts/crane.gd")
 const StructureScene = preload("res://scripts/structure_material.gd")
 const CameraRigScene = preload("res://scripts/camera_rig.gd")
 const HudScene = preload("res://scripts/machine_hud.gd")
@@ -11,6 +12,7 @@ const FacilityExpansionScene = preload("res://scripts/facility_expansion.gd")
 const HazardFieldScene = preload("res://scripts/hazard_field.gd")
 const MissionDirectorScene = preload("res://scripts/mission_director.gd")
 const CaptureRunnerScene = preload("res://scripts/visual_capture.gd")
+const CraneCheckScene = preload("res://scripts/crane_check.gd")
 const LoadPathCouplerScene = preload(
     "res://scripts/load_path_coupler.gd"
 )
@@ -19,6 +21,7 @@ var hud
 var camera_rig
 var player
 var excavator
+var crane
 var structure
 var yard
 var facility_expansion
@@ -39,6 +42,10 @@ func _ready() -> void:
         var capture_runner := CaptureRunnerScene.new()
         add_child(capture_runner)
         capture_runner.begin(self)
+    elif OS.get_environment("KF_CRANE_CHECK") == "1":
+        var crane_check := CraneCheckScene.new()
+        add_child(crane_check)
+        crane_check.begin(self)
 
 func _process(delta: float) -> void:
     if OS.get_environment("KF_CAPTURE") == "1":
@@ -129,6 +136,15 @@ func _build_gameplay() -> void:
     excavator.player_exited.connect(_on_machine_exited)
     excavator.machine_disabled.connect(_on_machine_disabled)
 
+    crane = CraneScene.new()
+    crane.position = Vector3(-6.5, -0.10, -12.0)
+    crane.rotation.y = -0.85
+    add_child(crane)
+    crane.configure(hud, camera_rig)
+    crane.player_entered.connect(_on_machine_entered)
+    crane.player_exited.connect(_on_machine_exited)
+    crane.machine_disabled.connect(_on_machine_disabled)
+
     var operator = _spawn_enemy(Vector3(4.0, 0.03, -3.0))
     excavator.set_enemy_driver(operator)
     _spawn_enemy(Vector3(-3.0, 0.03, 5.0))
@@ -164,10 +180,28 @@ func _retarget_enemies(target_node) -> void:
             enemy.set_target(target_node)
 
 func _on_player_use(user) -> void:
-    if excavator.request_hijack(user):
+    var machine = _nearest_machine(user.global_position)
+    if machine != null and machine.request_hijack(user):
         return
     if hud != null and hud.has_method("set_interaction_hint"):
-        hud.set_interaction_hint("MOVE CLOSER // USE WHEN THE EXCAVATOR IS WITHIN REACH")
+        hud.set_interaction_hint("MOVE CLOSER // USE WHEN A MACHINE IS WITHIN REACH")
+
+
+## Machines are interchangeable to everything outside them: whichever one
+## the player is standing next to is the one they take.
+func _nearest_machine(from: Vector3, max_distance: float = 12.0):
+    var best = null
+    var best_distance := max_distance
+    for machine in get_tree().get_nodes_in_group("machine"):
+        if not is_instance_valid(machine) or machine.disabled:
+            continue
+        if machine.player_driver != null:
+            continue
+        var distance: float = machine.global_position.distance_to(from)
+        if distance < best_distance:
+            best_distance = distance
+            best = machine
+    return best
 
 func _on_machine_entered(machine) -> void:
     camera_rig.enter_machine_view(machine)
@@ -197,7 +231,9 @@ func _on_machine_exited(_machine) -> void:
 func _on_machine_disabled(machine) -> void:
     if machine.player_driver != null:
         machine.exit_player()
-    hud.set_context("EXCAVATOR DISABLED // RETURN TO FOOT CONTROL")
+    hud.set_context(
+        "%s DISABLED // RETURN TO FOOT CONTROL" % machine.machine_name()
+    )
     _retarget_enemies(player)
 
 func _on_structure_collapsed_camera() -> void:
@@ -206,22 +242,37 @@ func _on_structure_collapsed_camera() -> void:
     pass
 
 func _update_interaction_prompt() -> void:
-    if hud == null or not hud.has_method("set_interaction_hint") or player == null or excavator == null:
+    if hud == null or not hud.has_method("set_interaction_hint") or player == null:
         return
-    if excavator.player_driver != null:
-        return
+    for machine in get_tree().get_nodes_in_group("machine"):
+        if is_instance_valid(machine) and machine.player_driver != null:
+            return
     if not player.visible or player.health <= 0.0:
         hud.set_interaction_hint("")
         return
-    if excavator.disabled:
-        var disabled_dist: float = player.global_position.distance_to(excavator.global_position)
-        hud.set_interaction_hint("EXCAVATOR DISABLED // WRECKAGE REMAINS PHYSICAL") if disabled_dist < 6.5 else hud.set_interaction_hint("")
+
+    var target = _nearest_machine(player.global_position)
+    if target == null:
+        if excavator != null and excavator.disabled:
+            var wreck_distance: float = player.global_position.distance_to(
+                excavator.global_position
+            )
+            if wreck_distance < 6.5:
+                hud.set_interaction_hint(
+                    "EXCAVATOR DISABLED // WRECKAGE REMAINS PHYSICAL"
+                )
+                return
+        hud.set_interaction_hint("")
         return
 
-    var distance: float = player.global_position.distance_to(excavator.global_position)
+    var distance: float = player.global_position.distance_to(
+        target.global_position
+    )
     var climb_range: float = float(player.get("machine_climb_range")) if player.get("machine_climb_range") != null else 5.8
-    if distance <= 3.5:
-        hud.set_interaction_hint("USE  //  HIJACK EXCAVATOR // ENTER OPERATOR POV")
+    if distance <= target.machine_entry_reach():
+        hud.set_interaction_hint(
+            "USE  //  HIJACK %s // ENTER OPERATOR POV" % target.machine_name()
+        )
     elif distance <= climb_range:
         hud.set_interaction_hint("USE  //  LATCH + CLIMB TO CAB")
     elif mission != null and int(mission.get("stage")) == 1:
@@ -229,29 +280,45 @@ func _update_interaction_prompt() -> void:
     else:
         hud.set_interaction_hint("")
 
+## Any machine the player is not sitting in is a machine the yard crew can
+## walk over and take back.
 func _try_enemy_reclaim() -> void:
-    if excavator == null or excavator.disabled:
-        return
-    if excavator.player_driver != null or excavator.enemy_driver != null or excavator.is_hijack_in_progress():
-        return
     _reclaim_cooldown = maxf(0.0, _reclaim_cooldown - 0.45)
     if _reclaim_cooldown > 0.0:
         return
+    for machine in get_tree().get_nodes_in_group("machine"):
+        if not is_instance_valid(machine) or machine.disabled:
+            continue
+        if (
+            machine.player_driver != null
+            or machine.enemy_driver != null
+            or machine.is_hijack_in_progress()
+        ):
+            continue
+        if _reclaim_machine(machine):
+            return
+
+
+func _reclaim_machine(machine) -> bool:
     var best = null
     var best_distance := 9999.0
     for enemy in get_tree().get_nodes_in_group("enemy"):
         if not is_instance_valid(enemy) or enemy.dead or not enemy.visible:
             continue
-        var d: float = enemy.global_position.distance_to(excavator.global_position)
+        var d: float = enemy.global_position.distance_to(machine.global_position)
         if d < best_distance:
             best_distance = d
             best = enemy
     if best == null:
-        return
+        return false
     if best_distance <= 2.8:
-        excavator.set_enemy_driver(best)
+        machine.set_enemy_driver(best)
         _retarget_enemies(player)
-        hud.set_context("HOSTILE CREW RECLAIMED THE EXCAVATOR")
+        hud.set_context(
+            "HOSTILE CREW RECLAIMED THE %s" % machine.machine_name()
+        )
         _reclaim_cooldown = 6.0
-    elif best.has_method("set_target") and best_distance < 15.0:
-        best.set_target(excavator)
+        return true
+    if best.has_method("set_target") and best_distance < 15.0:
+        best.set_target(machine)
+    return false
