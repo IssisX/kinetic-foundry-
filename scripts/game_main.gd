@@ -13,6 +13,7 @@ const HazardFieldScene = preload("res://scripts/hazard_field.gd")
 const MissionDirectorScene = preload("res://scripts/mission_director.gd")
 const CaptureRunnerScene = preload("res://scripts/visual_capture.gd")
 const CraneCheckScene = preload("res://scripts/crane_check.gd")
+const EnemyCheckScene = preload("res://scripts/enemy_check.gd")
 const LoadPathCouplerScene = preload(
     "res://scripts/load_path_coupler.gd"
 )
@@ -46,6 +47,10 @@ func _ready() -> void:
         var crane_check := CraneCheckScene.new()
         add_child(crane_check)
         crane_check.begin(self)
+    elif OS.get_environment("KF_ENEMY_CHECK") == "1":
+        var enemy_check := EnemyCheckScene.new()
+        add_child(enemy_check)
+        enemy_check.begin(self)
 
 func _process(delta: float) -> void:
     if OS.get_environment("KF_CAPTURE") == "1":
@@ -145,13 +150,14 @@ func _build_gameplay() -> void:
     crane.player_exited.connect(_on_machine_exited)
     crane.machine_disabled.connect(_on_machine_disabled)
 
-    var operator = _spawn_enemy(Vector3(4.0, 0.03, -3.0))
+    var operator = _spawn_enemy(Vector3(4.0, 0.03, -3.0), EnemyScene.RIGGER)
     excavator.set_enemy_driver(operator)
-    _spawn_enemy(Vector3(-3.0, 0.03, 5.0))
-    _spawn_enemy(Vector3(1.0, 0.03, 10.0))
-    _spawn_enemy(Vector3(8.0, 0.03, 7.0))
-    _spawn_enemy(Vector3(-11.5, 0.03, -1.0))
-    _spawn_enemy(Vector3(14.0, 0.03, 11.5))
+    _spawn_enemy(Vector3(-3.0, 0.03, 5.0), EnemyScene.GRUNT)
+    _spawn_enemy(Vector3(1.0, 0.03, 10.0), EnemyScene.PLATE)
+    _spawn_enemy(Vector3(8.0, 0.03, 7.0), EnemyScene.THROWER)
+    _spawn_enemy(Vector3(-11.5, 0.03, -1.0), EnemyScene.HEAVY)
+    _spawn_enemy(Vector3(14.0, 0.03, 11.5), EnemyScene.RUNNER)
+    _spawn_enemy(Vector3(-4.0, 0.03, -9.5), EnemyScene.RIGGER)
 
     structure = StructureScene.new()
     structure.position = Vector3(11.0, 0.0, -14.0)
@@ -167,8 +173,9 @@ func _build_mission() -> void:
     add_child(mission)
     mission.configure(player, excavator, structure, hud)
 
-func _spawn_enemy(pos: Vector3):
+func _spawn_enemy(pos: Vector3, archetype: int = EnemyScene.GRUNT):
     var enemy = EnemyScene.new()
+    enemy.archetype = archetype
     enemy.position = pos
     add_child(enemy)
     enemy.set_target(player)

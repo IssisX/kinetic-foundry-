@@ -15,6 +15,8 @@ var barrel_shape := false
 var machine_held := false
 var _saved_linear_damp := 0.0
 var _saved_angular_damp := 0.0
+var _flight_time := 0.0
+var _flight_source: Node
 
 func _ready() -> void:
     add_to_group("physics_prop")
@@ -22,6 +24,88 @@ func _ready() -> void:
     collision_mask = 1 | 2 | 4 | 8
     sleeping = true
     can_sleep = true
+    set_physics_process(false)
+
+
+## A thrown crate is a weapon. Anyone who can pick this up can launch it,
+## and what it hits is decided by the mass and speed it arrives with, not
+## by who threw it.
+func launch(throw_velocity: Vector3, source: Node = null) -> void:
+    set_held(false)
+    sleeping = false
+    linear_velocity = throw_velocity
+    angular_velocity = Vector3(
+        throw_velocity.z,
+        0.9,
+        -throw_velocity.x
+    ) * 0.22
+    _flight_source = source
+    _flight_time = 2.4
+    contact_monitor = true
+    max_contacts_reported = 4
+    if not body_entered.is_connected(_on_flight_contact):
+        body_entered.connect(_on_flight_contact)
+    set_physics_process(true)
+
+
+func _physics_process(delta: float) -> void:
+    if _flight_time <= 0.0:
+        set_physics_process(false)
+        return
+    _flight_time -= delta
+    if _flight_time <= 0.0:
+        _end_flight()
+
+
+func _on_flight_contact(body: Node) -> void:
+    if _flight_time <= 0.0 or body == self or body == _flight_source:
+        return
+    var speed := linear_velocity.length()
+    if speed < 3.0:
+        _end_flight()
+        return
+
+    var direction := linear_velocity / speed
+    var energy := EnergyPartition.collision_energy(
+        mass,
+        _struck_mass(body),
+        speed
+    )
+    MaterialResponse.impact(
+        body,
+        global_position,
+        direction,
+        energy,
+        mass,
+        MaterialResponse.material_of(self, FoundryMaterial.TIMBER),
+        {"area": 0.12, "radius": 3.4}
+    )
+
+    var damage := clampf(energy / 260.0, 6.0, 70.0)
+    if body.has_method("take_hit"):
+        body.take_hit(direction * minf(speed * 0.9, 16.0) + Vector3.UP * 2.2, damage)
+    elif body.has_method("machine_hit_at"):
+        body.machine_hit_at(damage, direction, global_position, energy)
+    elif body.has_method("machine_hit"):
+        body.machine_hit(damage, direction, global_position)
+    elif body.has_method("receive_enemy_hit"):
+        body.receive_enemy_hit(damage)
+    _end_flight()
+
+
+func _struck_mass(body: Node) -> float:
+    if body is RigidBody3D:
+        return maxf((body as RigidBody3D).mass, 1.0)
+    if body is CharacterBody3D:
+        return 92.0
+    return 900.0
+
+
+func _end_flight() -> void:
+    _flight_time = 0.0
+    _flight_source = null
+    contact_monitor = false
+    set_physics_process(false)
 
 func configure_box(size: Vector3, color: Color, mass_value: float = 75.0, hp: float = 80.0) -> void:
     mass = mass_value

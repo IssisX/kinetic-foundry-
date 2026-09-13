@@ -303,9 +303,18 @@ func _attack() -> void:
 
     if held_target != null and is_instance_valid(held_target):
         var throw_dir: Vector3 = -global_basis.z
-        held_target.set_held(false)
         var throw_mult: float = maxf(throw_force_multiplier, 0.5)
-        held_target.take_hit(throw_dir * 17.0 * throw_mult + Vector3.UP * 6.2 * throw_mult, 38.0 * throw_mult)
+        if held_target.has_method("launch"):
+            held_target.launch(
+                throw_dir * 17.0 * throw_mult + Vector3.UP * 6.2 * throw_mult,
+                self
+            )
+        else:
+            held_target.set_held(false)
+            held_target.take_hit(
+                throw_dir * 17.0 * throw_mult + Vector3.UP * 6.2 * throw_mult,
+                38.0 * throw_mult
+            )
         _compose_camera_impact(held_target.global_position + Vector3.UP * 0.8, 0.92)
         held_target = null
         combo_step = 0
