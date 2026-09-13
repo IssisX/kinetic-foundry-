@@ -515,7 +515,7 @@ func _fracture_at(
     )
 
     for i in 2:
-        var child := StructuralDebris.new()
+        var child = get_script().new()
         parent_node.add_child(child)
         child.global_transform = global_transform
         var local_offset := _axis_vector(_axis_index) * offsets[i]

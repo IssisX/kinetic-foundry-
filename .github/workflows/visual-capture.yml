@@ -62,7 +62,7 @@ jobs:
           rm -rf "$CAPTURE_DIR"
           mkdir -p "$CAPTURE_DIR"
           set +e
-          timeout --signal=TERM 45s xvfb-run -a -s "-screen 0 1800x1500x24" \
+          timeout --signal=TERM 58s xvfb-run -a -s "-screen 0 1800x1500x24" \
             "$GODOT_BIN" --path . --audio-driver Dummy 2>&1 | tee /tmp/kinetic-capture.log
           status=${PIPESTATUS[0]}
           set -e
