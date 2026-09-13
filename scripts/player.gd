@@ -372,8 +372,16 @@ func _grab_or_throw() -> void:
     if held_target != null and is_instance_valid(held_target):
         var dir: Vector3 = -global_basis.z
         var throw_mult: float = maxf(throw_force_multiplier, 0.5)
-        held_target.set_held(false)
-        held_target.take_hit(dir * 13.5 * throw_mult + Vector3.UP * 5.2 * throw_mult, 24.0 * throw_mult)
+        # A corpse is wreckage, not a grapple partner: hurl it as a real
+        # projectile with its own momentum rather than a scripted push.
+        if bool(held_target.get("dead")) and held_target.has_method("launch"):
+            held_target.launch(
+                dir * 15.0 * throw_mult + Vector3.UP * 5.6 * throw_mult,
+                self
+            )
+        else:
+            held_target.set_held(false)
+            held_target.take_hit(dir * 13.5 * throw_mult + Vector3.UP * 5.2 * throw_mult, 24.0 * throw_mult)
         _compose_camera_impact(held_target.global_position + Vector3.UP * 0.8, 0.78)
         held_target = null
         return
@@ -403,8 +411,6 @@ func _find_grabbable(radius: float):
     candidates.append_array(get_tree().get_nodes_in_group("physics_prop"))
     for node in candidates:
         if not is_instance_valid(node):
-            continue
-        if node.is_in_group("enemy") and node.dead:
             continue
         if node.is_in_group("physics_prop") and node.mass > grab_mass_limit:
             continue

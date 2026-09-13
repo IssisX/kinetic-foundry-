@@ -29,6 +29,11 @@ const MACHINE_MOUNT_RANGE := 2.7
 const THROW_RANGE_MIN := 5.5
 const THROW_RANGE_MAX := 17.0
 const SALVAGE_RANGE := 8.0
+## A dead body is mass the coupling law says should stay relevant: gravity,
+## grabbable, throwable. Not a ragdoll - the pose is not simulated, only
+## the body it drags across the yard.
+const CORPSE_MASS := 78.0
+const CORPSE_FLIGHT_SECONDS := 2.2
 
 var target: Node3D
 var health := 100.0
@@ -55,6 +60,8 @@ var _grip := MachineGrip.new()
 var _carry_anchor: Node3D
 var _throw_cooldown := 0.0
 var _salvage_cooldown := 0.0
+var _corpse_flight_time := 0.0
+var _corpse_flight_source: Node
 
 
 static func archetype_stats(id: int) -> Dictionary:
@@ -331,6 +338,19 @@ func set_held(value: bool) -> void:
     if held:
         velocity = Vector3.ZERO
         attack_windup = 0.0
+        _corpse_flight_time = 0.0
+
+
+## Thrown, not carried: the corpse becomes a projectile with its own
+## momentum and does real damage to whatever it hits, the same way a
+## thrown crate does.
+func launch(throw_velocity: Vector3, source: Node = null) -> void:
+    if not dead:
+        return
+    held = false
+    velocity = throw_velocity
+    _corpse_flight_source = source
+    _corpse_flight_time = CORPSE_FLIGHT_SECONDS
 
 
 func _physics_process(delta: float) -> void:
@@ -347,9 +367,15 @@ func _physics_process(delta: float) -> void:
     if not is_on_floor():
         velocity.y -= 24.0 * delta
     if dead:
-        velocity.x = move_toward(velocity.x, 0.0, 5.5 * delta)
-        velocity.z = move_toward(velocity.z, 0.0, 5.5 * delta)
+        var in_flight := _corpse_flight_time > 0.0
+        if in_flight:
+            _corpse_flight_time -= delta
+        else:
+            velocity.x = move_toward(velocity.x, 0.0, 5.5 * delta)
+            velocity.z = move_toward(velocity.z, 0.0, 5.5 * delta)
         move_and_slide()
+        if in_flight:
+            _resolve_corpse_impact()
         _animate(delta)
         return
     if target == null or not is_instance_valid(target):
@@ -595,6 +621,51 @@ func _find_salvage() -> RigidBody3D:
 func _drop_carried() -> void:
     if _grip.is_holding():
         _grip.release(Vector3.ZERO, false)
+
+
+## What a thrown body hits takes real damage. No material record is kept
+## on the surface it struck: a body is not part of the closed material
+## catalog, and inventing a soft-tissue identity for it would be exactly
+## the "browse until it looks cool" the catalog is closed against.
+func _resolve_corpse_impact() -> void:
+    var speed := velocity.length()
+    if speed < 2.5:
+        _corpse_flight_time = 0.0
+        return
+    var direction := velocity.normalized() if speed > 0.0001 else Vector3.UP
+    for i in get_slide_collision_count():
+        var collision := get_slide_collision(i)
+        var body: Object = collision.get_collider()
+        if body == null or body == self or body == _corpse_flight_source:
+            continue
+        var energy := EnergyPartition.collision_energy(
+            CORPSE_MASS,
+            _collided_mass(body),
+            speed
+        )
+        var damage := clampf(energy / 300.0, 6.0, 60.0)
+        var point: Vector3 = collision.get_position()
+        if body.has_method("machine_hit_at"):
+            body.machine_hit_at(damage, direction, point, energy)
+        elif body.has_method("machine_hit"):
+            body.machine_hit(damage, direction, point)
+        elif body.has_method("take_hit"):
+            body.take_hit(
+                direction * minf(speed * 0.8, 14.0) + Vector3.UP * 2.0,
+                damage
+            )
+        elif body.has_method("receive_enemy_hit"):
+            body.receive_enemy_hit(damage)
+        _corpse_flight_time = 0.0
+        return
+
+
+func _collided_mass(body: Object) -> float:
+    if body is RigidBody3D:
+        return maxf((body as RigidBody3D).mass, 1.0)
+    if body is CharacterBody3D:
+        return 90.0
+    return 900.0
 
 
 func _separation_force() -> Vector3:
