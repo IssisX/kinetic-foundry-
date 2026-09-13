@@ -66,68 +66,51 @@ func _build_environment() -> void:
     var world := WorldEnvironment.new()
     var env := Environment.new()
 
-    # Late-shift foundry air. Shade has to stay readable: the previous pass
-    # crushed the toe to black (ACES + glow + 0.20 ambient). Filmic with a
-    # dim cool shade still lets the sun write a real shadow.
     var sky_mat := ProceduralSkyMaterial.new()
-    sky_mat.sky_top_color = Color(0.22, 0.30, 0.38)
-    sky_mat.sky_horizon_color = Color(0.74, 0.60, 0.44)
-    sky_mat.ground_bottom_color = Color(0.10, 0.10, 0.095)
-    sky_mat.ground_horizon_color = Color(0.36, 0.33, 0.28)
-    sky_mat.sky_curve = 0.12
-    sky_mat.sun_angle_max = 22.0
-    sky_mat.sun_curve = 0.07
+    sky_mat.sky_top_color = Color(0.28, 0.36, 0.44)
+    sky_mat.sky_horizon_color = Color(0.76, 0.64, 0.48)
+    sky_mat.ground_bottom_color = Color(0.12, 0.12, 0.11)
+    sky_mat.ground_horizon_color = Color(0.40, 0.38, 0.33)
+    sky_mat.sky_curve = 0.13
+    sky_mat.sun_angle_max = 18.0
+    sky_mat.sun_curve = 0.08
     var sky := Sky.new()
     sky.sky_material = sky_mat
 
     env.background_mode = Environment.BG_SKY
     env.sky = sky
-    env.background_energy_multiplier = 0.92
+    env.background_energy_multiplier = 1.0
     env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
-    env.ambient_light_color = Color(0.40, 0.46, 0.52)
-    env.ambient_light_energy = 0.46
+    env.ambient_light_color = Color(0.48, 0.54, 0.60)
+    env.ambient_light_energy = 0.58
     env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
     env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
-    env.tonemap_exposure = 1.06
-    env.tonemap_white = 6.0
+    env.tonemap_exposure = 1.08
     env.fog_enabled = true
-    env.fog_light_color = Color(0.60, 0.54, 0.44)
-    env.fog_light_energy = 0.38
-    env.fog_density = 0.0018
-    env.fog_aerial_perspective = 0.28
-    env.fog_sky_affect = 0.45
+    env.fog_light_color = Color(0.64, 0.58, 0.48)
+    env.fog_light_energy = 0.42
+    env.fog_density = 0.0014
+    env.fog_aerial_perspective = 0.22
+    env.fog_sky_affect = 0.40
     env.fog_height = 0.0
-    env.fog_height_density = 0.020
-    env.glow_enabled = false
+    env.fog_height_density = 0.016
     world.environment = env
     add_child(world)
 
-    # Low sun, two splits. Four-split maps on Compatibility software GL
-    # were painting the whole yard as shadow.
+    # Afternoon sun, engine-default shadow path. Custom 2/4-split maps on
+    # Compatibility software GL marked the whole yard as shadow.
     var sun := DirectionalLight3D.new()
-    sun.rotation_degrees = Vector3(-30.0, -52.0, 0.0)
-    sun.light_color = Color(1.0, 0.88, 0.70)
-    sun.light_energy = 2.05
-    sun.light_specular = 0.75
-    sun.light_angular_distance = 0.5
+    sun.rotation_degrees = Vector3(-34.0, -48.0, 0.0)
+    sun.light_color = Color(1.0, 0.90, 0.74)
+    sun.light_energy = 2.30
     sun.shadow_enabled = true
-    sun.shadow_bias = 0.03
-    sun.shadow_normal_bias = 0.85
-    sun.shadow_blur = 0.7
-    sun.shadow_opacity = 0.88
-    sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
-    sun.directional_shadow_blend_splits = true
-    sun.directional_shadow_max_distance = 72.0
-    sun.directional_shadow_split_1 = 0.18
-    sun.directional_shadow_fade_start = 0.90
-    sun.directional_shadow_pancake_size = 8.0
+    sun.directional_shadow_max_distance = 90.0
     add_child(sun)
 
     var sky_fill := DirectionalLight3D.new()
-    sky_fill.rotation_degrees = Vector3(-18.0, 128.0, 0.0)
-    sky_fill.light_color = Color(0.48, 0.60, 0.72)
-    sky_fill.light_energy = 0.18
-    sky_fill.light_specular = 0.0
+    sky_fill.rotation_degrees = Vector3(-22.0, 132.0, 0.0)
+    sky_fill.light_color = Color(0.52, 0.64, 0.76)
+    sky_fill.light_energy = 0.22
     sky_fill.shadow_enabled = false
     add_child(sky_fill)
 

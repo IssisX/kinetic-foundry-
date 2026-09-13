@@ -421,16 +421,16 @@ func _spawn_box_prop(pos: Vector3, size: Vector3, color: Color, mass_value: floa
     prop.configure_box(size, color, mass_value, maxf(72.0, mass_value * 1.85))
 
 func _build_work_lights() -> void:
-    _yard_light(Vector3(-14.0, 7.3, 4.0), Color(1.0, 0.62, 0.28), 9.5, 22.0, true)
-    _yard_light(Vector3(3.0, 8.2, -7.0), Color(1.0, 0.70, 0.34), 11.0, 24.0, true)
-    _yard_light(Vector3(17.0, 7.0, 10.0), Color(0.62, 0.74, 0.82), 5.5, 16.0, false)
+    _yard_light(Vector3(-14.0, 7.3, 4.0), Color(1.0, 0.62, 0.28), 6.2, 20.0, true)
+    _yard_light(Vector3(3.0, 8.2, -7.0), Color(1.0, 0.70, 0.34), 7.0, 22.0, true)
+    _yard_light(Vector3(17.0, 7.0, 10.0), Color(0.62, 0.74, 0.82), 3.8, 15.0, false)
     GeomUtil.work_spot(
         self,
         Vector3(0.0, 11.4, -23.2),
         Vector3(2.0, 0.2, -4.0),
         Color(1.0, 0.68, 0.36),
-        14.0,
-        34.0,
+        8.5,
+        30.0,
         42.0,
         true
     )
