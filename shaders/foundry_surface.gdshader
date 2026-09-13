@@ -21,13 +21,26 @@ uniform float film_gloss : hint_range(0.0, 1.0) = 0.0;
 uniform float thermal_emission : hint_range(0.0, 8.0) = 0.0;
 uniform float crack_depth = 0.035;
 uniform float shimmer_m = 0.0;
+uniform vec3 impact_local = vec3(0.0);
+uniform float impact_radius = 0.0;
+uniform float impact_depth = 0.0;
 
 varying vec4 v_solver;
+varying float v_crater;
 
 void vertex() {
 	v_solver = COLOR;
 	float d = clamp(COLOR.r, 0.0, 1.0);
-	VERTEX += NORMAL * (shimmer_m - crack_depth * d * d);
+	float crater = 0.0;
+	if (impact_radius > 0.001) {
+		float q = length(VERTEX - impact_local) / impact_radius;
+		if (q < 1.0) {
+			float x = 1.0 - q;
+			crater = x * x * x * x * (1.0 + 4.0 * q);
+		}
+	}
+	v_crater = crater;
+	VERTEX += NORMAL * (shimmer_m - crack_depth * d * d - impact_depth * crater);
 }
 
 void fragment() {
@@ -48,6 +61,7 @@ void fragment() {
 	albedo = mix(albedo, film_color.rgb, film_amount * 0.78);
 	// Crease occlusion without depending on AO support on Compatibility.
 	albedo *= 1.0 - 0.22 * d * d;
+	albedo *= 1.0 - 0.16 * v_crater;
 
 	float strain_glow = pow(heat, 4.0) * (0.35 + 0.65 * d);
 

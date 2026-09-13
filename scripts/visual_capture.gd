@@ -11,43 +11,53 @@ func begin(root: Node3D) -> void:
     if capture_dir.is_empty():
         capture_dir = ProjectSettings.globalize_path("res://captures/latest")
     DirAccess.make_dir_recursive_absolute(capture_dir)
+    _freeze_gameplay()
+    if game.camera_rig != null:
+        game.camera_rig.collision_enabled = false
     call_deferred("_run")
 
 func _run() -> void:
-    await _settle_frames(6)
-    _freeze_gameplay()
+    get_tree().paused = true
+    await _settle_frames(4)
 
     _stage_yard_overview()
-    await _settle_frames(8)
+    await _settle_frames(4)
     _capture("01_yard_overview.png")
 
     _stage_combat()
-    await _settle_frames(8)
+    await _settle_frames(4)
     _capture("02_grounded_combat.png")
 
     _stage_excavator_operator_pov()
-    await _settle_frames(8)
+    await _settle_frames(4)
     _capture("03_excavator_load_control.png")
 
     _stage_structure_damage()
-    await _settle_frames(8)
+    await _settle_frames(4)
     _capture("04_progressive_structure_damage.png")
 
+    get_tree().paused = false
     _stage_structure_collapse()
     await _settle_physics_frames(58)
-    await _settle_frames(8)
+    await _settle_frames(4)
+    get_tree().paused = true
     _capture("05_collapse_aftermath.png")
 
+    get_tree().paused = false
     _stage_breach_gate()
     await _settle_physics_frames(24)
-    await _settle_frames(8)
+    await _settle_frames(4)
+    get_tree().paused = true
     _capture("06_breached_route.png")
 
+    get_tree().paused = false
     _stage_crane_load_swing()
     await _settle_physics_frames(46)
-    await _settle_frames(8)
+    await _settle_frames(4)
+    get_tree().paused = true
     _capture("09_crane_suspended_load.png")
 
+    get_tree().paused = false
     var gait_ok: bool = await _stage_gait_observables()
     if not gait_ok:
         get_tree().quit(4)
@@ -158,12 +168,13 @@ func _stage_excavator_operator_pov() -> void:
 func _stage_structure_damage() -> void:
     _release_capture_load()
     var beam = _heaviest_prop()
+    var support_a = game.structure.supports[0] if game.structure.supports.size() > 0 else null
+    var hit_point := game.structure.global_position + Vector3(-3.7, 2.1, -2.2)
+    if support_a != null and is_instance_valid(support_a):
+        hit_point = support_a.global_position + Vector3(0.38, -0.35, 0.12)
     if beam != null and game.excavator != null:
         game.excavator.hold_load(beam)
-        beam.global_position = (
-            game.structure.global_position
-            + Vector3(-2.4, 1.35, 0.8)
-        )
+        beam.global_position = hit_point + Vector3(0.55, 0.18, 0.08)
         game.excavator.global_position = Vector3(7.2, -0.17, -10.8)
         game.excavator.rotation.y = -0.55
         game.excavator.arm_yaw = 0.18
@@ -171,15 +182,25 @@ func _stage_structure_damage() -> void:
         game.excavator.stick_angle = 0.46
         game.excavator.tool_angle = -0.42
         game.excavator._apply_arm_pose()
-    game.structure.damage_support(0, 68.0, Vector3(1.0, 0.0, 0.22))
-    game.structure.damage_support(2, 34.0, Vector3(0.72, 0.0, -0.34))
+    game.structure.damage_support(
+        0,
+        72.0,
+        Vector3(1.0, 0.08, 0.18),
+        hit_point,
+        18500.0
+    )
+    game.structure.damage_support(2, 22.0, Vector3(0.55, 0.0, -0.28))
     game.mission.stage = 2
     _set_machine_hud()
-    game.hud.set_objective("DROP THE TRANSFER PLATFORM", "420 KG BEAM IS THE TOOL // READ THE LOAD PATH THROUGH THE COLUMN")
+    game.hud.set_objective("DROP THE TRANSFER PLATFORM", "HIT THE FLANGE // THE COLUMN KINKS WHERE THE BEAM LANDS")
     game.hud.set_objective_progress(0.52)
     game.hud.set_machine_telemetry(0.84, 0.76, 0.90, 0.88, true)
-    game.hud.set_context("MASS WORKING STEEL // SUPPORT 01 CRITICAL")
-    _camera(Vector3(22.0, 10.5, -3.0), game.structure.global_position + Vector3(0.0, 2.5, 0.0), 50.0)
+    game.hud.set_context("ON-POINT CONTACT // COMPACT KERNEL // COLUMN BUCKLE")
+    _camera(
+        hit_point + Vector3(3.6, 1.15, 2.4),
+        hit_point + Vector3(-0.15, 0.05, -0.05),
+        38.0
+    )
 
 func _stage_structure_collapse() -> void:
     _release_capture_load()
@@ -209,14 +230,26 @@ func _stage_breach_gate() -> void:
         push_error("CAPTURE_BREACH_GATE_MISSING")
         return
     var gate = gates[0]
-    gate.damage_panel(0, 145.0, Vector3(0.15, 0.05, 1.0))
+    var punch := gate.global_position + Vector3(-2.15, 2.35, -0.12)
+    if gate.panels.size() > 0 and is_instance_valid(gate.panels[0]):
+        punch = gate.panels[0].global_position + Vector3(-0.72, 0.48, -0.12)
+    if gate.has_method("damage_panel_at"):
+        gate.damage_panel_at(
+            0,
+            145.0,
+            Vector3(0.18, 0.04, 1.0),
+            punch,
+            24000.0
+        )
+    else:
+        gate.damage_panel(0, 145.0, Vector3(0.15, 0.05, 1.0))
     game.mission.stage = 4
     _set_machine_hud()
-    game.hud.set_objective("BREACH THE NORTH ACCESS", "ROUTE CONTROL IS PHYSICAL // THE DOOR BECOMES DEBRIS")
+    game.hud.set_objective("BREACH THE NORTH ACCESS", "STAR-CRACK FROM THE BUCKET // CELLS FAIL AT THE CONTACT")
     game.hud.set_objective_progress(1.0)
     game.hud.set_machine_telemetry(0.79, 0.72, 0.86, 0.94, false)
-    game.hud.set_context("ACCESS OPEN // DEBRIS REMAINS IN WORLD")
-    _camera(gate.global_position + Vector3(11.0, 7.0, -12.0), gate.global_position + Vector3(0.0, 1.6, 0.0), 52.0)
+    game.hud.set_context("ON-POINT FRACTURE // HOLE YOU CAN DRIVE THROUGH")
+    _camera(punch + Vector3(3.8, 1.6, -4.6), punch + Vector3(0.1, -0.15, 0.0), 40.0)
 
 func _stage_gait_observables() -> bool:
     _show_all_enemies(false)

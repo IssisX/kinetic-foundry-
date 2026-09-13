@@ -144,3 +144,26 @@ static func static_box(
     body.add_child(box_mesh(size, color))
     add_box_collision(body, size)
     return body
+
+
+static func add_heightmap_collision(
+        body: CollisionObject3D,
+        width: int,
+        depth: int,
+        heights: PackedFloat32Array,
+        grid_span: Vector3,
+        y_offset: float = 0.0
+) -> CollisionShape3D:
+    var shape := HeightMapShape3D.new()
+    shape.map_width = maxi(width, 2)
+    shape.map_depth = maxi(depth, 2)
+    shape.map_data = heights
+    var node := CollisionShape3D.new()
+    node.name = "DeformedHeight"
+    node.shape = shape
+    node.position.y = y_offset
+    var sx := grid_span.x / maxf(float(shape.map_width - 1), 1.0)
+    var sz := grid_span.z / maxf(float(shape.map_depth - 1), 1.0)
+    node.scale = Vector3(sx, 1.0, sz)
+    body.add_child(node)
+    return node

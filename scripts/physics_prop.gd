@@ -121,9 +121,7 @@ func _on_live_contact(body: Node) -> void:
         direction = Vector3.DOWN
     else:
         direction = direction.normalized()
-    var point := global_position
-    if body is Node3D:
-        point = global_position.lerp((body as Node3D).global_position, 0.5)
+    var point := _contact_point_on(body)
 
     var consequence := MaterialResponse.collide(
         self,
@@ -358,16 +356,44 @@ func _receive_impact(
         impulse * mass * 0.18 * impact_scale,
         to_local(point)
     )
-    ImpactFx.spawn(get_parent(), global_position + Vector3.UP * 0.45, direction, impact_color, clampf(damage / 20.0, 0.7, 3.5), 7)
+    ImpactFx.spawn(get_parent(), point, direction, impact_color, clampf(damage / 20.0, 0.7, 3.5), 7)
+    set_meta("last_hit_point", point)
     if health <= 0.0:
         _destroy(direction)
+
+func _contact_point_on(body: Node) -> Vector3:
+    if not (body is Node3D) or not is_inside_tree():
+        return global_position
+    var other := body as Node3D
+    var space := get_world_3d().direct_space_state if get_world_3d() != null else null
+    if space == null:
+        return global_position.lerp(other.global_position, 0.5)
+    var toward := other.global_position - global_position
+    if toward.length_squared() < 0.0001:
+        toward = linear_velocity
+    if toward.length_squared() < 0.0001:
+        toward = Vector3.DOWN
+    var query := PhysicsRayQueryParameters3D.create(
+        global_position,
+        global_position + toward.normalized() * maxf(toward.length(), 0.6),
+        collision_mask
+    )
+    query.exclude = [get_rid()]
+    var hit := space.intersect_ray(query)
+    if hit.is_empty():
+        return global_position.lerp(other.global_position, 0.35)
+    return hit.position as Vector3
+
 
 func _destroy(direction: Vector3) -> void:
     destroyed = true
     linear_damp = 0.18
     angular_damp = 0.12
-    ImpactFx.spawn(get_parent(), global_position + Vector3.UP * 0.35, direction, impact_color, 3.4, 13)
-    _spawn_fragments(direction)
+    var origin := global_position
+    if has_meta("last_hit_point"):
+        origin = get_meta("last_hit_point") as Vector3
+    ImpactFx.spawn(get_parent(), origin, direction, impact_color, 3.4, 13)
+    _spawn_fragments(direction, origin)
     MaterialResponse.forget(self)
     visible = false
     collision_layer = 0
@@ -375,10 +401,13 @@ func _destroy(direction: Vector3) -> void:
     freeze = true
     queue_free()
 
-func _spawn_fragments(direction: Vector3) -> void:
+func _spawn_fragments(direction: Vector3, origin: Vector3 = Vector3.ZERO) -> void:
     var parent := get_parent()
     if parent == null:
         return
+    var blast := origin
+    if blast == Vector3.ZERO:
+        blast = global_position
     var parent_state := MaterialResponse.state_for(self, _material_id())
     var fragment_count := 5 if barrel_shape else 4
     var leftover := float(
@@ -392,11 +421,15 @@ func _spawn_fragments(direction: Vector3) -> void:
     for i in fragment_count:
         var piece := PhysicsProp.new()
         parent.add_child(piece)
-        piece.global_position = global_position + Vector3(
-            (float(i % 2) - 0.5) * source_size.x * 0.35,
-            0.18 + float(i % 3) * 0.10,
-            (float((i + 1) % 2) - 0.5) * source_size.z * 0.35
+        var scatter_dir := Vector3(
+            direction.x + (-0.7 + float(i) * 0.31),
+            0.55 + float(i % 2) * 0.32,
+            direction.z + (0.6 - float(i) * 0.22)
         )
+        if scatter_dir.length_squared() < 0.001:
+            scatter_dir = Vector3.UP
+        scatter_dir = scatter_dir.normalized()
+        piece.global_position = blast + scatter_dir * (0.12 + float(i) * 0.05)
         var piece_mass := mass / float(fragment_count)
         var chunk_size := Vector3(
             maxf(0.18, source_size.x * (0.34 if barrel_shape else 0.42)),
@@ -413,12 +446,5 @@ func _spawn_fragments(direction: Vector3) -> void:
         piece._arm_contact_sense()
         var share := leftover / float(fragment_count)
         var speed := sqrt(2.0 * share / maxf(piece.mass, 0.001))
-        var scatter := Vector3(
-            direction.x + (-0.7 + float(i) * 0.31),
-            0.55 + float(i % 2) * 0.32,
-            direction.z + (0.6 - float(i) * 0.22)
-        ).normalized()
-        piece.apply_central_impulse(scatter * piece.mass * speed)
-        piece.apply_torque_impulse(
-            Vector3(scatter.z, 0.6, -scatter.x) * piece.mass * speed * 0.22
-        )
+        piece.linear_velocity = scatter_dir * speed + linear_velocity * 0.35
+        piece.angular_velocity = scatter_dir.cross(Vector3.UP) * (4.0 + float(i))

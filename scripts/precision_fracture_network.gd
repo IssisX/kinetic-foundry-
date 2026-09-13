@@ -40,18 +40,48 @@ func apply_impact(
         impulse_direction = Vector3(0.0, 1.0, 0.0)
 
     # The base solver owns energy, impulse, and bond failure. This compact
-    # kernel only supplies a permanent local dent for close visual reading.
+    # kernel only supplies a permanent local dent and star-cracks that
+    # originate at the true contact, not the object's average.
     for i in _positions.size():
+        if is_retired(i) or _pinned[i]:
+            continue
         var distance := _rest_positions[i].distance_to(local_point)
         var weight := _wendland(distance / maxf(radius, 0.001))
-        if _pinned[i] or weight <= 0.0:
+        if weight <= 0.0:
             continue
         var dent := (
             cell
-            * (0.010 + energy_ratio * 0.018)
+            * (0.012 + energy_ratio * 0.022)
             * weight
         )
         _positions[i] += impulse_direction * dent
+
+    if energy_ratio >= 0.55:
+        var ray_count := clampi(3 + int(energy_ratio), 3, 7)
+        var ray_length := radius * (1.35 + energy_ratio * 0.55)
+        var ray_ends: Array[Vector3] = []
+        var seed := local_point.x * 12.9898 + local_point.z * 78.233
+        var spin := fmod(absf(seed) * 0.17, TAU)
+        for ray_index in ray_count:
+            var angle := spin + TAU * float(ray_index) / float(ray_count)
+            ray_ends.append(
+                local_point
+                + Vector3(cos(angle), 0.0, sin(angle)) * ray_length
+            )
+        _cut_ray_family(
+            local_point,
+            ray_ends,
+            radius * 0.42,
+            cell * (0.42 + energy_ratio * 0.12),
+            energy_ratio
+        )
+        if energy_ratio >= 1.45:
+            _cut_spall_ring(
+                local_point,
+                radius * 0.68,
+                cell * 0.38
+            )
+
     _revision += 1
     var settle_steps := clampi(2 + int(energy_ratio), 2, 5)
     for _i in settle_steps:

@@ -301,8 +301,26 @@ func _on_live_contact(body: Node) -> void:
         else Vector3.DOWN
     )
     var point := global_position
-    if body is Node3D:
-        point = global_position.lerp((body as Node3D).global_position, 0.5)
+    if body is Node3D and is_inside_tree() and get_world_3d() != null:
+        var other := body as Node3D
+        var space := get_world_3d().direct_space_state
+        var toward := other.global_position - global_position
+        if toward.length_squared() < 0.0001:
+            toward = linear_velocity
+        if toward.length_squared() > 0.0001 and space != null:
+            var query := PhysicsRayQueryParameters3D.create(
+                global_position,
+                global_position + toward.normalized() * maxf(toward.length(), 0.6),
+                collision_mask
+            )
+            query.exclude = [get_rid()]
+            var hit := space.intersect_ray(query)
+            if hit.is_empty():
+                point = global_position.lerp(other.global_position, 0.35)
+            else:
+                point = hit.position as Vector3
+        else:
+            point = global_position.lerp(other.global_position, 0.35)
     var consequence := MaterialResponse.collide(
         self,
         body,

@@ -112,12 +112,36 @@ func refresh(force: bool = false) -> void:
 ## frame with no new damage/exposure event, so it cannot wait on the
 ## surface_state revision guard the way paint/oxidation can.
 func _push_resonance_uniform() -> void:
-    if resonance_source == null or _surface_material == null:
+    if _surface_material == null:
         return
-    _surface_material.set_shader_parameter(
-        "shimmer_m",
-        MaterialResponse.resonance_shimmer(resonance_source)
-    )
+    if resonance_source != null:
+        _surface_material.set_shader_parameter(
+            "shimmer_m",
+            MaterialResponse.resonance_shimmer(resonance_source)
+        )
+    if network == null:
+        return
+    var impact_point := Vector3.ZERO
+    var impact_radius := 0.0
+    if network.has_method("get_last_impact_point"):
+        impact_point = _map_position(network.get_last_impact_point())
+    if network.has_method("get_last_impact_radius"):
+        impact_radius = float(network.get_last_impact_radius())
+    var depth := 0.0
+    if impact_radius > 0.001:
+        depth = clampf(impact_radius * 0.045, 0.01, 0.16)
+    _surface_material.set_shader_parameter("impact_local", impact_point)
+    _surface_material.set_shader_parameter("impact_radius", impact_radius)
+    _surface_material.set_shader_parameter("impact_depth", depth)
+
+
+func _any_retired(indices: Array) -> bool:
+    if network == null or not network.has_method("is_retired"):
+        return false
+    for index in indices:
+        if network.is_retired(int(index)):
+            return true
+    return false
 
 
 func _push_surface_uniforms() -> void:
@@ -170,6 +194,8 @@ func _rebuild_surface() -> void:
             var right := first + 1
             var down := first + grid.x
             var diagonal := down + 1
+            if _any_retired([first, down, right, diagonal]):
+                continue
             _append_triangle(
                 indices,
                 normals,
@@ -186,6 +212,9 @@ func _rebuild_surface() -> void:
                 down,
                 diagonal
             )
+    if indices.is_empty():
+        _surface.mesh = null
+        return
     var packed_normals := PackedVector3Array()
     for normal in normals:
         packed_normals.append(

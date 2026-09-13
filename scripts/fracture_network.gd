@@ -65,6 +65,8 @@ var _fracture_finalized := false
 var _last_impact_point := Vector3.ZERO
 var _last_impact_direction := Vector3.UP
 var _last_substep_delta := 0.016
+var _last_impact_radius := 0.0
+var _retired: Array[bool] = []
 
 
 func configure_grid(
@@ -103,6 +105,7 @@ func configure_grid(
     _forces.clear()
     _previous_positions.clear()
     _pinned.clear()
+    _retired.clear()
     _bonds.clear()
 
     var count := columns * rows
@@ -126,6 +129,7 @@ func configure_grid(
             _forces.append(Vector3.ZERO)
             _previous_positions.append(position)
             _pinned.append(_is_pinned(column, row))
+            _retired.append(false)
 
     for row in rows:
         for column in columns:
@@ -208,17 +212,30 @@ func _add_bond(
 func apply_force(local_point: Vector3, force: Vector3) -> void:
     if _positions.is_empty() or force.length_squared() < 0.0001:
         return
-    var nearest := _nearest_nodes(local_point, 4)
+    var radius := maxf(_cell_scale() * 1.6, 0.28)
     var weight_sum := 0.0
-    for entry in nearest:
-        weight_sum += 1.0 / (0.20 + sqrt(float(entry.distance)))
+    var weights: Array[float] = []
+    for i in _positions.size():
+        if bool(_retired[i]):
+            weights.append(0.0)
+            continue
+        var weight := _wendland(
+            _positions[i].distance_to(local_point) / radius
+        )
+        weights.append(weight)
+        weight_sum += weight
     if weight_sum <= 0.0:
+        var nearest := _nearest_nodes(local_point, 1)
+        if nearest.is_empty():
+            return
+        var index := int(nearest[0].index)
+        if not bool(_retired[index]):
+            _forces[index] += force
         return
-    for entry in nearest:
-        var weight := (
-            1.0 / (0.20 + sqrt(float(entry.distance)))
-        ) / weight_sum
-        _forces[int(entry.index)] += force * weight
+    for i in _positions.size():
+        if weights[i] <= 0.0:
+            continue
+        _forces[i] += force * (weights[i] / weight_sum)
 
 
 func apply_impact(
@@ -238,26 +255,40 @@ func apply_impact(
         if safe_impulse.length_squared() > 0.0001
         else Vector3.UP
     )
+    _last_impact_radius = impact_kernel_radius(energy)
     _release_point = local_point
     _release_direction = _last_impact_direction
     _release_momentum += safe_impulse
     _input_energy += energy
 
-    var nearest := _nearest_nodes(local_point, 4)
+    var radius := _last_impact_radius
     var weight_sum := 0.0
-    for entry in nearest:
-        weight_sum += 1.0 / (0.16 + sqrt(float(entry.distance)))
-    for entry in nearest:
-        var weight := (
-            1.0 / (0.16 + sqrt(float(entry.distance)))
-        ) / maxf(weight_sum, 0.001)
-        var index := int(entry.index)
-        if not _pinned[index] or _fracture_finalized:
-            _velocities[index] += (
+    var weights: Array[float] = []
+    for i in _positions.size():
+        if bool(_retired[i]):
+            weights.append(0.0)
+            continue
+        var weight := _wendland(
+            _positions[i].distance_to(local_point) / maxf(radius, 0.001)
+        )
+        weights.append(weight)
+        weight_sum += weight
+    if weight_sum <= 0.0:
+        var nearest := _nearest_nodes(local_point, 1)
+        if not nearest.is_empty():
+            var index := int(nearest[0].index)
+            weights[index] = 1.0
+            weight_sum = 1.0
+    for i in _positions.size():
+        if weights[i] <= 0.0:
+            continue
+        var weight := weights[i] / maxf(weight_sum, 0.001)
+        if not _pinned[i] or _fracture_finalized:
+            _velocities[i] += (
                 safe_impulse * weight / maxf(_node_mass, 0.001)
             )
 
-    var radius := maxf(span.length() * 0.34, 0.8)
+    var bond_radius := radius * 1.18
     var bond_weights: Array[float] = []
     var bond_weight_sum := 0.0
     for bond in _bonds:
@@ -265,20 +296,22 @@ func apply_impact(
             _positions[int(bond.a)]
             + _positions[int(bond.b)]
         ) * 0.5
-        var distance := midpoint.distance_to(local_point)
-        var weight := exp(-distance * distance / (radius * radius))
+        var weight := _wendland(
+            midpoint.distance_to(local_point) / maxf(bond_radius, 0.001)
+        )
         bond_weights.append(weight)
         if bool(bond.active):
             bond_weight_sum += weight
 
     var fracture_share := energy * 0.46
+    if bond_weight_sum <= 0.0:
+        bond_weight_sum = 0.001
     for bond_index in _bonds.size():
         var bond := _bonds[bond_index]
         if not bool(bond.active):
             continue
         var work := fracture_share * (
-            bond_weights[bond_index]
-            / maxf(bond_weight_sum, 0.001)
+            bond_weights[bond_index] / bond_weight_sum
         )
         bond.fracture_work = float(bond.fracture_work) + work
         var work_damage := float(bond.fracture_work) / maxf(
@@ -300,6 +333,8 @@ func apply_impact(
 func _nearest_nodes(local_point: Vector3, count: int) -> Array:
     var result: Array = []
     for i in _positions.size():
+        if i < _retired.size() and bool(_retired[i]):
+            continue
         var entry := {
             "index": i,
             "distance": _positions[i].distance_squared_to(local_point)
@@ -343,6 +378,9 @@ func _step_substep(delta: float) -> void:
     var inverse_mass := 1.0 / maxf(_node_mass, 0.001)
     for i in _positions.size():
         _previous_positions[i] = _positions[i]
+        if is_retired(i):
+            _velocities[i] = Vector3.ZERO
+            continue
         if _pinned[i] and not _fracture_finalized:
             _positions[i] = _rest_positions[i]
             _velocities[i] = Vector3.ZERO
@@ -363,6 +401,9 @@ func _step_substep(delta: float) -> void:
 
     var moved := false
     for i in _positions.size():
+        if is_retired(i):
+            _velocities[i] = Vector3.ZERO
+            continue
         if _pinned[i] and not _fracture_finalized:
             _positions[i] = _rest_positions[i]
             _velocities[i] = Vector3.ZERO
@@ -998,6 +1039,113 @@ func get_energy_state() -> Dictionary:
     }
 
 
+func impact_kernel_radius(energy: float) -> float:
+    var cell := _cell_scale()
+    var energy_ratio := clampf(
+        energy / maxf(total_mass * 18.0, 1.0),
+        0.0,
+        6.0
+    )
+    return cell * clampf(0.82 + sqrt(energy_ratio) * 1.05, 0.82, 2.65)
+
+
+func get_last_impact_point() -> Vector3:
+    return _last_impact_point
+
+
+func get_last_impact_direction() -> Vector3:
+    return _last_impact_direction
+
+
+func get_last_impact_radius() -> float:
+    return _last_impact_radius
+
+
+func is_retired(index: int) -> bool:
+    if index < 0 or index >= _retired.size():
+        return false
+    return bool(_retired[index])
+
+
+func _cell_scale() -> float:
+    var dx := span.x / maxf(float(columns - 1), 1.0)
+    var dz := span.z / maxf(float(rows - 1), 1.0)
+    return maxf(0.08, (absf(dx) + absf(dz)) * 0.5)
+
+
+func _wendland(q: float) -> float:
+    if q >= 1.0:
+        return 0.0
+    var x := maxf(0.0, 1.0 - q)
+    return x * x * x * x * (1.0 + 4.0 * q)
+
+
+func get_height_map_data() -> PackedFloat32Array:
+    var data := PackedFloat32Array()
+    data.resize(columns * rows)
+    for row in rows:
+        for column in columns:
+            var index := _index(column, row)
+            if is_retired(index):
+                data[row * columns + column] = NAN
+            else:
+                data[row * columns + column] = _positions[index].y
+    return data
+
+
+func take_detached_fragments(
+        fragment_thickness: float = 0.20,
+        minimum_nodes: int = 2
+) -> Array[Dictionary]:
+    _refresh_topology()
+    var components := _components()
+    if components.size() <= 1:
+        return []
+    var keep_index := 0
+    var keep_score := -INF
+    for i in components.size():
+        var score := float((components[i] as Array).size())
+        var has_pin := false
+        for node_index in components[i]:
+            if _pinned[int(node_index)] and not _fracture_finalized:
+                has_pin = true
+                break
+        if has_pin:
+            score += 100000.0
+        if score > keep_score:
+            keep_score = score
+            keep_index = i
+    var specs: Array[Dictionary] = []
+    for i in components.size():
+        if i == keep_index:
+            continue
+        var component: Array = components[i]
+        if component.size() < minimum_nodes:
+            _retire_component(component)
+            continue
+        specs.append(_component_spec(component, fragment_thickness))
+        _retire_component(component)
+    if not specs.is_empty():
+        _refresh_topology()
+        _revision += 1
+    return specs
+
+
+func _retire_component(component: Array) -> void:
+    for raw in component:
+        var index := int(raw)
+        if index < 0 or index >= _retired.size():
+            continue
+        _retired[index] = true
+        _velocities[index] = Vector3.ZERO
+        _forces[index] = Vector3.ZERO
+        _pinned[index] = true
+        for bond in _bonds:
+            if int(bond.a) == index or int(bond.b) == index:
+                if bool(bond.active):
+                    _break_bond(bond)
+
+
 func _components() -> Array:
     var adjacency: Array = []
     for _i in _positions.size():
@@ -1015,7 +1163,7 @@ func _components() -> Array:
         visited[i] = false
     var result: Array = []
     for start in _positions.size():
-        if visited[start]:
+        if visited[start] or is_retired(start):
             continue
         var component: Array[int] = []
         var queue: Array[int] = [start]
