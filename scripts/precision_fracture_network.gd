@@ -39,9 +39,10 @@ func apply_impact(
     if impulse_direction.length_squared() < 0.001:
         impulse_direction = Vector3(0.0, 1.0, 0.0)
 
-    # The base solver owns energy, impulse, and bond failure. This compact
-    # kernel only supplies a permanent local dent and star-cracks that
-    # originate at the true contact, not the object's average.
+    # The base solver owns energy, impulse, wave injection, and Griffith
+    # crack fronts. This compact kernel only supplies a permanent local dent
+    # and a directional bias so the fronts prefer star-cracks from the
+    # true contact, not the object's average.
     for i in _positions.size():
         if is_retired(i) or _pinned[i]:
             continue
@@ -56,7 +57,7 @@ func apply_impact(
         )
         _positions[i] += impulse_direction * dent
 
-    if energy_ratio >= 0.55:
+    if energy_ratio >= 0.45:
         var ray_count := clampi(3 + int(energy_ratio), 3, 7)
         var ray_length := radius * (1.35 + energy_ratio * 0.55)
         var ray_ends: Array[Vector3] = []
@@ -68,23 +69,24 @@ func apply_impact(
                 local_point
                 + Vector3(cos(angle), 0.0, sin(angle)) * ray_length
             )
-        _cut_ray_family(
+        _bias_ray_family(
             local_point,
             ray_ends,
             radius * 0.42,
             cell * (0.42 + energy_ratio * 0.12),
             energy_ratio
         )
-        if energy_ratio >= 1.45:
-            _cut_spall_ring(
-                local_point,
-                radius * 0.68,
-                cell * 0.38
-            )
 
     _revision += 1
-    var settle_steps := clampi(2 + int(energy_ratio), 2, 5)
+    var settle_steps := clampi(4 + int(energy_ratio * 2.0), 4, 10)
     for _i in settle_steps:
+        step(1.0 / 120.0)
+    if energy_ratio >= 1.45:
+        _cut_spall_ring(
+            local_point,
+            radius * 0.68,
+            cell * 0.38
+        )
         step(1.0 / 120.0)
     var deformation := get_deformation_state()
     deformation["impact_energy"] = energy_state
@@ -101,6 +103,67 @@ func fracture_localized(
         impact_energy,
         Fidelity.max_shards()
     )
+
+func _bias_ray_family(
+        origin: Vector3,
+        ray_ends: Array[Vector3],
+        core_radius: float,
+        crack_width: float,
+        energy_ratio: float
+) -> void:
+    for bond_index in _bonds.size():
+        var bond: Dictionary = _bonds[bond_index]
+        if not bool(bond.active):
+            continue
+        var first := int(bond.a)
+        var second := int(bond.b)
+        var first_position := _rest_positions[first]
+        var second_position := _rest_positions[second]
+        var midpoint := (first_position + second_position) * 0.5
+        var radial_distance := midpoint.distance_to(origin)
+        var crack_proximity := INF
+        var crosses_crack := false
+        for ray_end in ray_ends:
+            crack_proximity = minf(
+                crack_proximity,
+                _distance_to_segment_xz(midpoint, origin, ray_end)
+            )
+            if _segments_intersect_xz(
+                    first_position,
+                    second_position,
+                    origin,
+                    ray_end
+            ):
+                crosses_crack = true
+
+        var core_weight := _wendland(
+            radial_distance / maxf(core_radius, 0.001)
+        )
+        var proximity_weight := clampf(
+            1.0 - crack_proximity / maxf(crack_width, 0.001),
+            0.0,
+            1.0
+        )
+        var crack_weight := maxf(
+            proximity_weight,
+            1.0 if crosses_crack else 0.0
+        )
+        if crack_weight < 0.08 and core_weight < 0.08:
+            continue
+        var score := (
+            core_weight * energy_ratio * 0.40
+            + crack_weight * (0.42 + energy_ratio * 0.16)
+        )
+        bond.history = maxf(
+            float(bond.history),
+            damage_onset + score * (failure_strain - damage_onset)
+        )
+        bond.damage = clampf(
+            maxf(float(bond.damage), score * 0.38),
+            0.0,
+            0.92
+        )
+        # Fronts own topology. Bias never severs a bond on its own.
 
 func _cut_ray_family(
         origin: Vector3,

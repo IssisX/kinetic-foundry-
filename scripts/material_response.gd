@@ -491,6 +491,13 @@ func excite_resonance(target: Object, mass: float, energy: float) -> void:
     _excite(target, mass, float(EnergyPartition.split(energy).acoustic))
 
 
+func set_resonance_stiffness(target: Object, stiffness_ratio: float) -> void:
+    var resonator := _resonator_for(target)
+    if resonator == null:
+        return
+    resonator.set_stiffness_scale(stiffness_ratio)
+
+
 func _excite(target: Object, mass: float, acoustic_energy: float) -> void:
     if target == null or acoustic_energy <= 0.0:
         return
@@ -676,6 +683,7 @@ func _emit(
             "surface_energy": float(terms.fracture),
             "plastic_energy": float(terms.plastic),
             "kinetic_energy": float(terms.kinetic),
+            "stiffness_ratio": float(options.get("stiffness_ratio", 1.0)),
             "grit": float(consequence.get("grit", 0.2)),
             "ring": float(consequence.get("ring", 0.6))
         }

@@ -27,9 +27,11 @@ uniform float impact_depth = 0.0;
 
 varying vec4 v_solver;
 varying float v_crater;
+varying float v_wave;
 
 void vertex() {
 	v_solver = COLOR;
+	v_wave = clamp(COLOR.a, 0.0, 1.0);
 	float d = clamp(COLOR.r, 0.0, 1.0);
 	float crater = 0.0;
 	if (impact_radius > 0.001) {
@@ -40,13 +42,14 @@ void vertex() {
 		}
 	}
 	v_crater = crater;
-	VERTEX += NORMAL * (shimmer_m - crack_depth * d * d - impact_depth * crater);
+	VERTEX += NORMAL * (shimmer_m - crack_depth * d * d - impact_depth * crater + v_wave * 0.012);
 }
 
 void fragment() {
 	float d = clamp(v_solver.r, 0.0, 1.0);
 	float heat = clamp(v_solver.g, 0.0, 1.0);
 	float load = clamp(v_solver.b, 0.0, 1.0);
+	float wave = clamp(v_wave, 0.0, 1.0);
 
 	// Working steel goes bare, then dark oxide. Only the narrow band right
 	// at a failing bond reads as an actual opening.
@@ -62,8 +65,10 @@ void fragment() {
 	// Crease occlusion without depending on AO support on Compatibility.
 	albedo *= 1.0 - 0.22 * d * d;
 	albedo *= 1.0 - 0.16 * v_crater;
+	albedo *= 1.0 + 0.22 * wave;
 
 	float strain_glow = pow(heat, 4.0) * (0.35 + 0.65 * d);
+	float wave_glow = pow(wave, 1.6) * 0.85;
 
 	ALBEDO = albedo;
 	METALLIC = clamp(
@@ -72,9 +77,9 @@ void fragment() {
 		1.0
 	);
 	ROUGHNESS = clamp(
-		roughness_base + d * 0.22 + oxidation_level * 0.18 - load * 0.05 - film_gloss * 0.55,
+		roughness_base + d * 0.22 + oxidation_level * 0.18 - load * 0.05 - film_gloss * 0.55 - wave * 0.12,
 		0.05,
 		0.99
 	);
-	EMISSION = heat_color.rgb * (strain_glow + thermal_emission);
+	EMISSION = heat_color.rgb * (strain_glow + thermal_emission + wave_glow);
 }

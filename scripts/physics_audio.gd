@@ -71,7 +71,8 @@ func physical_event(event: Dictionary) -> void:
         mass,
         fracture,
         duration,
-        position
+        position,
+        clampf(float(event.get("stiffness_ratio", 1.0)), 0.12, 1.0)
     )
     var player := AudioStreamPlayer3D.new()
     player.stream = wav
@@ -228,7 +229,8 @@ func _synthesize(
         mass: float,
         fracture: float,
         duration: float,
-        position: Vector3
+        position: Vector3,
+        stiffness_ratio: float = 1.0
 ) -> AudioStreamWAV:
     var frame_count := maxi(64, int(duration * float(MIX_RATE)))
     var bytes := PackedByteArray()
@@ -247,10 +249,23 @@ func _synthesize(
     rng.seed = seed_value
 
     var data := FoundryMaterial.of(material_id)
-    var base_frequency := _base_frequency(material_id, mass, event_type)
-    var ring_gain := float(data.get("ring_gain", 0.7))
+    var base_frequency := _base_frequency(
+        material_id,
+        mass,
+        event_type,
+        stiffness_ratio
+    )
+    var ring_gain := float(data.get("ring_gain", 0.7)) * lerpf(
+        0.42,
+        1.0,
+        stiffness_ratio
+    )
     var grit_gain := float(data.get("grit_gain", 0.25))
-    var decay_rate := float(data.get("decay", 3.1))
+    var decay_rate := float(data.get("decay", 3.1)) * lerpf(
+        2.4,
+        1.0,
+        stiffness_ratio
+    )
     var energy := clampf(log(1.0 + impulse * 0.020) / 4.0, 0.06, 1.0)
     var low_mix := clampf(mass / 1200.0, 0.0, 1.0)
 
@@ -306,7 +321,12 @@ func _synthesize(
     wav.data = bytes
     return wav
 
-func _base_frequency(material_id: int, mass: float, event_type: String) -> float:
+func _base_frequency(
+        material_id: int,
+        mass: float,
+        event_type: String,
+        stiffness_ratio: float = 1.0
+) -> float:
     if event_type == "collapse":
         return clampf(
             68.0 / pow(maxf(mass / 650.0, 0.25), 0.18),
@@ -317,7 +337,8 @@ func _base_frequency(material_id: int, mass: float, event_type: String) -> float
     var reference := float(data.get("ring_hz", 285.0))
     var exponent := float(data.get("mass_exponent", 0.24))
     var frequency := reference / pow(maxf(mass / 80.0, 0.22), exponent)
-    return clampf(frequency, reference * 0.28, reference * 1.45)
+    frequency *= sqrt(clampf(stiffness_ratio, 0.12, 1.0))
+    return clampf(frequency, reference * 0.22, reference * 1.45)
 
 func _prune_voices() -> void:
     var valid: Array[AudioStreamPlayer3D] = []

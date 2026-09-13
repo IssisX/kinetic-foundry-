@@ -143,6 +143,22 @@ func _owner_reaction(
         0.14,
         1.0
     )
+    var stiffness := clampf(
+        float(state.get("stiffness_ratio", 1.0)),
+        0.12,
+        1.0
+    )
+    if deformation.has("stiffness_ratio"):
+        stiffness = minf(
+            stiffness,
+            clampf(float(deformation.get("stiffness_ratio", 1.0)), 0.12, 1.0)
+        )
+    intact *= lerpf(0.22, 1.0, stiffness)
+    var wave_peak := clampf(
+        float(deformation.get("wave_peak", 0.0)),
+        0.0,
+        1.0
+    )
     var yielding := clampf(displacement / 0.90, 0.0, 1.0)
     var commanded := (
         0.18
@@ -150,6 +166,7 @@ func _owner_reaction(
         + effort * 0.30
         + persistence * 0.16
         + overload * 0.10
+        + wave_peak * 0.08
     )
     return clampf(
         commanded * intact - yielding * 0.10,

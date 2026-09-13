@@ -101,7 +101,10 @@ func refresh(force: bool = false) -> void:
     _push_surface_uniforms()
     _push_resonance_uniform()
     var revision: int = network.get_revision()
-    if not force and revision == _seen_revision:
+    var wave_live := false
+    if network.has_method("get_wave_peak"):
+        wave_live = float(network.get_wave_peak()) > 0.03
+    if not force and revision == _seen_revision and not wave_live:
         return
     _seen_revision = revision
     _rebuild_surface()
@@ -179,7 +182,13 @@ func _rebuild_surface() -> void:
                 clampf(network.get_node_damage(index), 0.0, 1.0),
                 clampf(network.get_node_heat(index), 0.0, 1.0),
                 clampf(network.get_node_load(index), 0.0, 1.0),
-                1.0
+                clampf(
+                    network.get_node_wave(index)
+                    if network.has_method("get_node_wave")
+                    else 0.0,
+                    0.0,
+                    1.0
+                )
             ))
             uvs.append(Vector2(
                 float(column) / float(grid.x - 1),

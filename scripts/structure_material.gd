@@ -6,14 +6,19 @@ const StructuralDebrisLocal = preload(
 )
 
 const SUPPORT_HEIGHT := 4.6
-const SUPPORT_SEGMENTS := 6
-const SUPPORT_SEGMENT_HEIGHT := SUPPORT_HEIGHT / float(SUPPORT_SEGMENTS)
 
 var _support_segments: Array = []
 var _support_segment_damage: Array = []
 var _support_last_hit_world: Array[Vector3] = []
 var _support_last_energy: Array[float] = []
 var _support_last_direction: Array[Vector3] = []
+var _support_last_wave: Array[float] = []
+
+func _support_segment_count() -> int:
+    return maxi(Fidelity.support_segments(), 3)
+
+func _support_segment_height() -> float:
+    return SUPPORT_HEIGHT / float(_support_segment_count())
 
 func _ready() -> void:
     super()
@@ -25,6 +30,7 @@ func _build_deformable_support_skins() -> void:
     _support_last_hit_world.clear()
     _support_last_energy.clear()
     _support_last_direction.clear()
+    _support_last_wave.clear()
 
     for index: int in supports.size():
         var segment_list: Array[MeshInstance3D] = []
@@ -32,6 +38,7 @@ func _build_deformable_support_skins() -> void:
         _support_last_hit_world.append(Vector3.ZERO)
         _support_last_energy.append(0.0)
         _support_last_direction.append(Vector3.UP)
+        _support_last_wave.append(0.0)
 
         if index < support_meshes.size() and is_instance_valid(support_meshes[index]):
             support_meshes[index].visible = false
@@ -40,11 +47,11 @@ func _build_deformable_support_skins() -> void:
             _support_segment_damage.append(damage_list)
             continue
 
-        for segment_index: int in SUPPORT_SEGMENTS:
+        for segment_index: int in _support_segment_count():
             var segment := GeomUtilLocal.box_mesh(
                 Vector3(
                     0.72,
-                    SUPPORT_SEGMENT_HEIGHT * 0.975,
+                    _support_segment_height() * 0.975,
                     0.72
                 ),
                 Color(0.39, 0.33, 0.20),
@@ -54,7 +61,7 @@ func _build_deformable_support_skins() -> void:
             segment.name = "DeformableColumn_%d" % segment_index
             segment.position.y = (
                 -SUPPORT_HEIGHT * 0.5
-                + SUPPORT_SEGMENT_HEIGHT * (float(segment_index) + 0.5)
+                + _support_segment_height() * (float(segment_index) + 0.5)
             )
             supports[index].add_child(segment)
             segment_list.append(segment)
@@ -143,7 +150,12 @@ func damage_support_at(
                 0.0,
                 1.0
             ),
-            "novelty": clampf(0.55 + removed / 120.0, 0.55, 1.0)
+            "novelty": clampf(0.55 + removed / 120.0, 0.55, 1.0),
+            "stiffness_ratio": (
+                deck_network.get_stiffness_ratio()
+                if deck_network != null
+                else 1.0
+            )
         }
     )
 
@@ -190,7 +202,7 @@ func _deform_support_at(
         0.0,
         2.2
     )
-    var sigma := SUPPORT_SEGMENT_HEIGHT * (0.65 + energy_ratio * 0.34)
+    var sigma := _support_segment_height() * (0.65 + energy_ratio * 0.34)
 
     for segment_index: int in segment_list.size():
         var segment := segment_list[segment_index] as MeshInstance3D
@@ -198,7 +210,7 @@ func _deform_support_at(
             continue
         var base_y := (
             -SUPPORT_HEIGHT * 0.5
-            + SUPPORT_SEGMENT_HEIGHT * (float(segment_index) + 0.5)
+            + _support_segment_height() * (float(segment_index) + 0.5)
         )
         var normalized := absf(base_y - local_point.y) / maxf(sigma, 0.01)
         var weight := exp(-0.5 * normalized * normalized)
@@ -281,6 +293,47 @@ func _shade_segment(
         0.04,
         1.0
     )
+
+
+func _transmit_wave_to_supports() -> void:
+    if collapsed or deck == null or deck_network == null:
+        return
+    if not deck_network.has_method("get_node_wave"):
+        return
+    if not deck_network.has_method("nearest_node_index"):
+        return
+    for index in supports.size():
+        if not is_instance_valid(supports[index]):
+            continue
+        if index >= support_health.size() or support_health[index] <= 0.0:
+            continue
+        var local_point := deck.to_local(supports[index].global_position)
+        local_point.y = 0.0
+        var node_index := int(deck_network.nearest_node_index(local_point))
+        if node_index < 0:
+            continue
+        var wave := float(deck_network.get_node_wave(node_index))
+        var previous := 0.0
+        if index < _support_last_wave.size():
+            previous = float(_support_last_wave[index])
+        else:
+            _support_last_wave.append(0.0)
+        if index < _support_last_wave.size():
+            _support_last_wave[index] = wave
+        if wave < previous + 0.10 or wave < 0.28:
+            continue
+        var flange := supports[index].global_position + Vector3.UP * 2.05
+        var incoming := Vector3.DOWN
+        if index < _support_last_direction.size():
+            incoming = _support_last_direction[index]
+        _deform_support_at(
+            index,
+            flange,
+            incoming + Vector3.DOWN * 0.35,
+            wave * 14.0,
+            wave * 9000.0
+        )
+
 
 func _break_support(index: int, direction: Vector3) -> void:
     if index < 0 or index >= supports.size():

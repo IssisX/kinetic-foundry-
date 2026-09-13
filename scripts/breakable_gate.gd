@@ -270,8 +270,14 @@ func damage_panel_at(
             "area": 0.14,
             "radius": maxf(CELL_SIZE, sqrt(energy) * 0.015),
             "fracture": clampf(broken_fraction * 2.5 + energy / 22000.0, 0.0, 1.0),
-            "novelty": clampf(0.58 + energy / 18000.0, 0.58, 1.0)
+            "novelty": clampf(0.58 + energy / 18000.0, 0.58, 1.0),
+            "stiffness_ratio": float(deformation.get("stiffness_ratio", 1.0))
         }
+    )
+    MaterialResponse.excite_resonance(panel, 310.0, energy)
+    MaterialResponse.set_resonance_stiffness(
+        panel,
+        float(deformation.get("stiffness_ratio", 1.0))
     )
     var catastrophic := (
         broken_fraction > 0.18
@@ -590,6 +596,8 @@ func get_load_path_state() -> Dictionary:
     var max_damage := 0.0
     var broken_fraction := 0.0
     var max_displacement := 0.0
+    var stiffness := 1.0
+    var wave_peak := 0.0
     for network in panel_networks:
         var state: Dictionary = network.get_deformation_state()
         max_damage = maxf(
@@ -604,15 +612,27 @@ func get_load_path_state() -> Dictionary:
             max_displacement,
             float(state.get("max_displacement", 0.0))
         )
+        stiffness = minf(
+            stiffness,
+            float(state.get("stiffness_ratio", 1.0))
+        )
+        wave_peak = maxf(
+            wave_peak,
+            float(state.get("wave_peak", 0.0))
+        )
     return {
         "wedge_mass": wedge_mass,
         "pry_energy": pry_energy,
         "damage": max_damage,
         "broken_fraction": broken_fraction,
+        "stiffness_ratio": stiffness,
+        "wave_peak": wave_peak,
         "deformation": {
             "max_displacement": max_displacement,
             "damage": max_damage,
-            "broken_fraction": broken_fraction
+            "broken_fraction": broken_fraction,
+            "stiffness_ratio": stiffness,
+            "wave_peak": wave_peak
         },
         "breached": breached
     }

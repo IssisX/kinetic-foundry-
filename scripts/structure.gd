@@ -245,18 +245,15 @@ func damage_support(
         )
         deck_network.step(1.0 / 60.0)
         MaterialResponse.excite_resonance(deck, DECK_MASS, impact_energy)
+        MaterialResponse.set_resonance_stiffness(
+            deck,
+            deck_network.get_stiffness_ratio()
+        )
         _release_detached_deck()
         _rebuild_deck_collider()
+        _transmit_wave_to_supports()
         if deck_skin != null:
             deck_skin.refresh(true)
-    var support: StaticBody3D = supports[index]
-    if is_instance_valid(support):
-        support.rotation.z += (
-            direction.x * effective_amount * 0.0009
-        )
-        support.rotation.x -= (
-            direction.z * effective_amount * 0.0009
-        )
     _update_support_material(index)
     if support_health[index] <= 0.0:
         _break_support(index, direction)
@@ -571,6 +568,11 @@ func apply_world_loads(loads: Array, delta: float) -> void:
             deck_skin.refresh()
         _release_detached_deck()
         _rebuild_deck_collider()
+        MaterialResponse.set_resonance_stiffness(
+            deck,
+            deck_network.get_stiffness_ratio()
+        )
+        _transmit_wave_to_supports()
         var deformation: Dictionary = (
             deck_network.get_deformation_state()
         )
@@ -678,15 +680,28 @@ func _rebuild_deck_collider(force: bool = false) -> void:
 
 func get_load_path_state() -> Dictionary:
     var deformation := {}
+    var stiffness := 1.0
+    var wave_peak := 0.0
     if deck_network != null:
         deformation = deck_network.get_deformation_state()
+        stiffness = float(deformation.get(
+            "stiffness_ratio",
+            deck_network.get_stiffness_ratio()
+        ))
+        wave_peak = float(deformation.get("wave_peak", 0.0))
     return {
         "live_load_mass": live_load_mass,
         "overload_ratio": overload_ratio,
         "fatigue": fatigue,
         "deformation": deformation,
+        "stiffness_ratio": stiffness,
+        "wave_peak": wave_peak,
         "collapsed": collapsed
     }
+
+
+func _transmit_wave_to_supports() -> void:
+    pass
 
 func _load_profile(body: Node) -> Dictionary:
     if body.has_method("get_load_profile"):

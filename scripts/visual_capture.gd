@@ -169,7 +169,7 @@ func _stage_structure_damage() -> void:
     _release_capture_load()
     var beam = _heaviest_prop()
     var support_a = game.structure.supports[0] if game.structure.supports.size() > 0 else null
-    var hit_point := game.structure.global_position + Vector3(-3.7, 2.1, -2.2)
+    var hit_point: Vector3 = game.structure.global_position + Vector3(-3.7, 2.1, -2.2)
     if support_a != null and is_instance_valid(support_a):
         hit_point = support_a.global_position + Vector3(0.38, -0.35, 0.12)
     if beam != null and game.excavator != null:
@@ -195,7 +195,7 @@ func _stage_structure_damage() -> void:
     game.hud.set_objective("DROP THE TRANSFER PLATFORM", "HIT THE FLANGE // THE COLUMN KINKS WHERE THE BEAM LANDS")
     game.hud.set_objective_progress(0.52)
     game.hud.set_machine_telemetry(0.84, 0.76, 0.90, 0.88, true)
-    game.hud.set_context("ON-POINT CONTACT // COMPACT KERNEL // COLUMN BUCKLE")
+    game.hud.set_context("STRESS WAVE // CRACK FRONT FROM CONTACT // FLANGE KINKS AT HIT HEIGHT")
     _camera(
         hit_point + Vector3(3.6, 1.15, 2.4),
         hit_point + Vector3(-0.15, 0.05, -0.05),
@@ -230,7 +230,7 @@ func _stage_breach_gate() -> void:
         push_error("CAPTURE_BREACH_GATE_MISSING")
         return
     var gate = gates[0]
-    var punch := gate.global_position + Vector3(-2.15, 2.35, -0.12)
+    var punch: Vector3 = gate.global_position + Vector3(-2.15, 2.35, -0.12)
     if gate.panels.size() > 0 and is_instance_valid(gate.panels[0]):
         punch = gate.panels[0].global_position + Vector3(-0.72, 0.48, -0.12)
     if gate.has_method("damage_panel_at"):
@@ -248,7 +248,7 @@ func _stage_breach_gate() -> void:
     game.hud.set_objective("BREACH THE NORTH ACCESS", "STAR-CRACK FROM THE BUCKET // CELLS FAIL AT THE CONTACT")
     game.hud.set_objective_progress(1.0)
     game.hud.set_machine_telemetry(0.79, 0.72, 0.86, 0.94, false)
-    game.hud.set_context("ON-POINT FRACTURE // HOLE YOU CAN DRIVE THROUGH")
+    game.hud.set_context("GRIFFITH FRONT // WAVE ARRIVES // HOLE YOU CAN DRIVE THROUGH")
     _camera(punch + Vector3(3.8, 1.6, -4.6), punch + Vector3(0.1, -0.15, 0.0), 40.0)
 
 func _stage_gait_observables() -> bool:
