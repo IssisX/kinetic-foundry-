@@ -2,12 +2,18 @@ extends Node3D
 
 const GeomUtil = preload("res://scripts/geom.gd")
 const BreakableGateScript = preload("res://scripts/breakable_gate.gd")
+const GateDeformationView = preload(
+    "res://scripts/gate_deformation_view.gd"
+)
 
 func _ready() -> void:
     name = "BreachLane"
     var gate := BreakableGateScript.new()
     gate.position = Vector3(0.0, 0.0, 23.5)
     add_child(gate)
+    var gate_view := GateDeformationView.new()
+    gate.add_child(gate_view)
+    gate_view.bind(gate)
     for x in [-5.4, 5.4]:
         GeomUtil.static_box(
             self,
