@@ -321,7 +321,9 @@ func _spawn_aftermath() -> void:
         deck.visible = false
         deck.collision_layer = 0
         deck.collision_mask = 0
-        var procedural_specs := deck_network.get_fragment_specs(0.34, 1)
+        var procedural_specs: Array[Dictionary] = (
+            deck_network.get_fragment_specs(0.34, 1)
+        )
         if not procedural_specs.is_empty():
             for i in procedural_specs.size():
                 var spec: Dictionary = procedural_specs[i]
@@ -472,7 +474,9 @@ func apply_world_loads(loads: Array, delta: float) -> void:
         deck_network.step(delta)
         if deck_skin != null:
             deck_skin.refresh()
-        var deformation := deck_network.get_deformation_state()
+        var deformation: Dictionary = (
+            deck_network.get_deformation_state()
+        )
         _network_damage_bank += (
             float(deformation.damage) * delta * 2.4
             + float(deformation.broken_fraction) * delta * 5.0
