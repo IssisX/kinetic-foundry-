@@ -28,8 +28,8 @@ var live_load_mass := 0.0
 var overload_ratio := 0.0
 var fatigue := 0.0
 var _overload_damage_bank := 0.0
-var deck_network: FractureNetwork
-var deck_skin: DeformationSkin3D
+var deck_network
+var deck_skin
 var _network_damage_bank := 0.0
 var _last_damage_point := Vector3.ZERO
 var _last_damage_direction := Vector3.DOWN
