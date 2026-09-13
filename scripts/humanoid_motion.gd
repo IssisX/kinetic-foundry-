@@ -797,6 +797,21 @@ func _solve_leg(
         desired_foot_basis,
         state.ankle
     )
+    if state.planted:
+        # The world-space ground contact is the stance authority. Reapply it
+        # after the complete transform chain so parent/Node3D conversion error
+        # cannot accumulate into visible tangential or vertical foot skate.
+        var sole_offset := foot.global_basis * Vector3(
+            0.0,
+            -ANKLE_TO_SOLE,
+            state.contact_z
+        )
+        var solved_contact := foot.global_position + sole_offset
+        foot.global_position = (
+            foot.global_position
+            + state.contact - solved_contact
+        )
+        state.ankle = foot.global_position
     state.reach = raw_distance / LEG_LEN
 
 func _bone_basis(
