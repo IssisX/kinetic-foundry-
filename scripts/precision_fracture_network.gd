@@ -18,7 +18,6 @@ func apply_impact(
         return {}
     last_impact_point = local_point
     last_impact_energy = maxf(impact_energy, 0.0)
-
     var cell := _cell_scale()
     var energy_ratio := clampf(
         last_impact_energy / maxf(total_mass * 18.0, 1.0),
@@ -31,209 +30,47 @@ func apply_impact(
         3.25
     )
     last_impact_radius = radius
-
+    var energy_state := super.apply_impact(
+        local_point,
+        impulse,
+        impact_energy
+    )
     var impulse_direction := impulse.normalized()
     if impulse_direction.length_squared() < 0.001:
         impulse_direction = Vector3(0.0, 1.0, 0.0)
 
-    var weights: Array[float] = []
-    weights.resize(_positions.size())
-    var weight_sum := 0.0
+    # The base solver owns energy, impulse, and bond failure. This compact
+    # kernel only supplies a permanent local dent for close visual reading.
     for i in _positions.size():
         var distance := _rest_positions[i].distance_to(local_point)
         var weight := _wendland(distance / maxf(radius, 0.001))
-        weights[i] = weight
-        weight_sum += weight
-
-    if weight_sum <= 0.0001:
-        return get_deformation_state()
-
-    var impulse_scale := clampf(
-        impulse.length() / maxf(total_mass * 9.0, 1.0),
-        0.0,
-        3.0
-    )
-    for i in _positions.size():
-        if _pinned[i] or weights[i] <= 0.0:
+        if _pinned[i] or weight <= 0.0:
             continue
-        var normalized_weight := weights[i] / weight_sum
-        var local_weight := weights[i]
         var dent := (
             cell
-            * (
-                0.025
-                + energy_ratio * 0.046
-                + impulse_scale * 0.015
-            )
-            * local_weight
+            * (0.010 + energy_ratio * 0.018)
+            * weight
         )
         _positions[i] += impulse_direction * dent
-        _velocities[i] += (
-            impulse
-            * normalized_weight
-            / maxf(_node_mass, 0.001)
-            * 0.020
-        )
-
-    for bond_index in _bonds.size():
-        var bond: Dictionary = _bonds[bond_index]
-        if not bool(bond.active):
-            continue
-        var first := int(bond.a)
-        var second := int(bond.b)
-        var midpoint := (
-            _rest_positions[first] + _rest_positions[second]
-        ) * 0.5
-        var weight := _wendland(
-            midpoint.distance_to(local_point) / maxf(radius, 0.001)
-        )
-        if weight <= 0.0:
-            continue
-        var axis := (
-            _rest_positions[second] - _rest_positions[first]
-        ).normalized()
-        var directional_shear := (
-            1.0 - absf(axis.dot(impulse_direction))
-        )
-        var damage_drive := (
-            energy_ratio * 0.27
-            + impulse_scale * 0.11
-        )
-        var damage_increment := (
-            weight
-            * damage_drive
-            * (0.70 + directional_shear * 0.55)
-        )
-        bond.damage = clampf(
-            float(bond.damage) + damage_increment,
-            0.0,
-            1.0
-        )
-        var plastic_increment := (
-            weight
-            * (energy_ratio * 0.006 + impulse_scale * 0.003)
-            * (0.72 + directional_shear * 0.55)
-        )
-        var direction_sign := signf(axis.dot(impulse_direction))
-        if absf(direction_sign) < 0.5:
-            direction_sign = 1.0
-        bond.plastic = clampf(
-            float(bond.plastic)
-            + direction_sign * plastic_increment,
-            -0.22,
-            0.22
-        )
-        if float(bond.damage) >= 1.0:
-            bond.active = false
-            _topology_dirty = true
-
-    var settle_steps := clampi(2 + int(energy_ratio * 2.0), 2, 8)
+    _revision += 1
+    var settle_steps := clampi(2 + int(energy_ratio), 2, 5)
     for _i in settle_steps:
         step(1.0 / 120.0)
-    return get_deformation_state()
+    var deformation := get_deformation_state()
+    deformation["impact_energy"] = energy_state
+    return deformation
 
 func fracture_localized(
         local_point: Vector3,
         impact_energy: float,
         impact_direction: Vector3
 ) -> void:
-    if _bonds.is_empty():
-        return
-    var cell := _cell_scale()
-    var energy_ratio := clampf(
-        impact_energy / maxf(total_mass * 16.0, 1.0),
-        0.55,
-        5.0
-    )
-    var core_radius := cell * clampf(
-        0.52 + sqrt(energy_ratio) * 0.42,
-        0.65,
-        2.10
-    )
-    var crack_width := cell * clampf(
-        0.12 + energy_ratio * 0.045,
-        0.12,
-        0.36
-    )
-
-    var planar := Vector2(impact_direction.x, impact_direction.z)
-    var base_angle := 0.0
-    if planar.length_squared() > 0.001:
-        base_angle = atan2(planar.y, planar.x)
-    else:
-        base_angle = (
-            local_point.x * 0.73
-            + local_point.z * 1.17
-            + impact_energy * 0.00013
-        )
-
-    var target_components := clampi(
-        2 + int(floor(sqrt(energy_ratio) * 1.55)),
-        2,
-        6
-    )
-    var crack_count := clampi(
-        target_components + (1 if energy_ratio > 2.8 else 0),
-        2,
+    fracture_by_energy(
+        local_point,
+        impact_direction,
+        impact_energy,
         7
     )
-    var crack_length := maxf(span.x, span.z) * 1.45
-    var ray_ends: Array[Vector3] = []
-    for crack_index in crack_count:
-        var phase := float(crack_index) / float(crack_count)
-        var angle := (
-            base_angle
-            + phase * TAU
-            + sin(float(crack_index) * 2.37 + base_angle) * 0.22
-        )
-        ray_ends.append(
-            local_point
-            + Vector3(cos(angle), 0.0, sin(angle)) * crack_length
-        )
-
-    _cut_ray_family(
-        local_point,
-        ray_ends,
-        core_radius,
-        crack_width,
-        energy_ratio
-    )
-    _refresh_topology()
-
-    # A visible fracture must change connectivity, not only bond shading. If the
-    # first radial family still leaves alternate diagonal load paths, add
-    # deterministic contact-origin cuts until the energy-derived target is met.
-    var reinforcement_pass := 0
-    while _component_count < target_components and reinforcement_pass < 4:
-        var extra_angle := (
-            base_angle
-            + (float(reinforcement_pass) + 0.5)
-            * TAU / float(maxi(target_components, 2))
-            + 0.31
-        )
-        var extra_end := (
-            local_point
-            + Vector3(cos(extra_angle), 0.0, sin(extra_angle))
-            * crack_length
-        )
-        _cut_single_ray(
-            local_point,
-            extra_end,
-            crack_width * (1.10 + float(reinforcement_pass) * 0.08),
-            energy_ratio
-        )
-        _refresh_topology()
-        reinforcement_pass += 1
-
-    # High-energy local spall detaches a bounded patch around the strike point.
-    # This is intentionally local: it avoids the old whole-panel column breakup.
-    if _component_count < target_components and energy_ratio >= 1.10:
-        _cut_spall_ring(
-            local_point,
-            cell * clampf(0.72 + energy_ratio * 0.18, 0.82, 1.60),
-            crack_width
-        )
-        _refresh_topology()
 
 func _cut_ray_family(
         origin: Vector3,
@@ -363,7 +200,7 @@ func _cut_spall_ring(
             bond.active = false
             _topology_dirty = true
 
-func get_node_position(column: int, row: int) -> Vector3:
+func get_grid_node_position(column: int, row: int) -> Vector3:
     if columns <= 0 or rows <= 0:
         return Vector3.ZERO
     var safe_column := clampi(column, 0, columns - 1)
@@ -373,10 +210,10 @@ func get_node_position(column: int, row: int) -> Vector3:
 func get_cell_state(column: int, row: int) -> Dictionary:
     if column < 0 or row < 0 or column + 1 >= columns or row + 1 >= rows:
         return {}
-    var p00 := get_node_position(column, row)
-    var p10 := get_node_position(column + 1, row)
-    var p01 := get_node_position(column, row + 1)
-    var p11 := get_node_position(column + 1, row + 1)
+    var p00 := get_grid_node_position(column, row)
+    var p10 := get_grid_node_position(column + 1, row)
+    var p01 := get_grid_node_position(column, row + 1)
+    var p11 := get_grid_node_position(column + 1, row + 1)
     var center := (p00 + p10 + p01 + p11) * 0.25
     var axis_x := ((p10 + p11) - (p00 + p01)) * 0.5
     var axis_z := ((p01 + p11) - (p00 + p10)) * 0.5
@@ -387,13 +224,24 @@ func get_cell_state(column: int, row: int) -> Dictionary:
     var normal := axis_z.cross(axis_x).normalized()
     if normal.y < 0.0:
         normal = -normal
+    var first := _index(column, row)
+    var second := _index(column + 1, row)
+    var third := _index(column, row + 1)
+    var fourth := _index(column + 1, row + 1)
+    var damage := (
+        get_node_damage(first)
+        + get_node_damage(second)
+        + get_node_damage(third)
+        + get_node_damage(fourth)
+    ) * 0.25
     return {
         "center": center,
         "axis_x": axis_x,
         "axis_z": axis_z,
         "normal": normal,
         "width": width,
-        "height": height_value
+        "height": height_value,
+        "damage": damage
     }
 
 func _cell_scale() -> float:

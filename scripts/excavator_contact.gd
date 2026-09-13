@@ -553,7 +553,12 @@ func _push_dynamic_arm_contacts() -> void:
                 continue
             affected[id] = true
             if body.has_method("machine_hit"):
-                body.machine_hit(force * 0.42, direction)
+                _deliver_machine_hit(
+                    body,
+                    force * 0.42,
+                    direction,
+                    collision.global_position
+                )
             else:
                 var impulse_mag: float = minf(
                     (8.0 + speed * 7.5) * body.mass,

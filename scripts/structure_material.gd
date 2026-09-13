@@ -64,16 +64,30 @@ func _build_deformable_support_skins() -> void:
         _support_segments.append(segment_list)
         _support_segment_damage.append(damage_list)
 
-func damage_support(index: int, amount: float, direction: Vector3) -> void:
-    var hit_pos := global_position
+func damage_support(
+        index: int,
+        amount: float,
+        direction: Vector3,
+        world_point: Vector3 = Vector3.ZERO,
+        source_energy: float = -1.0
+) -> void:
+    var hit_pos := world_point
+    if hit_pos == Vector3.ZERO:
+        hit_pos = global_position
     if index >= 0 and index < supports.size() and is_instance_valid(supports[index]):
-        hit_pos = supports[index].global_position + Vector3.UP * 1.05
+        if world_point == Vector3.ZERO:
+            hit_pos = (
+                supports[index].global_position + Vector3.UP * 1.05
+            )
+    var impact_energy := source_energy
+    if impact_energy < 0.0:
+        impact_energy = amount * amount * 3.0
     damage_support_at(
         index,
         amount,
         direction,
         hit_pos,
-        amount * amount * 3.0
+        impact_energy
     )
 
 func damage_support_at(
@@ -94,7 +108,13 @@ func damage_support_at(
         )
         _support_last_direction[index] = direction
 
-    super.damage_support(index, amount, direction)
+    super.damage_support(
+        index,
+        amount,
+        direction,
+        world_point,
+        impact_energy
+    )
 
     var removed := maxf(0.0, hp_before - support_health[index])
     if removed <= 0.0:

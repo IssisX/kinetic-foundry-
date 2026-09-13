@@ -108,7 +108,9 @@ func _build_gate() -> void:
             Vector3(PANEL_SIZE, 0.0, PANEL_SIZE),
             310.0,
             205.0,
-            true
+            true,
+            0.24,
+            610.0
         )
         panel_networks.append(network)
         _update_panel_skin(index)
@@ -300,6 +302,16 @@ func _update_panel_skin(index: int) -> void:
                 clampf(float(state.get("height", CELL_SIZE)) / CELL_SIZE, 0.72, 1.32),
                 1.0
             )
+            var damage := float(state.get("damage", 0.0))
+            if damage > 0.015:
+                cell.material_override = GeomUtil.material(
+                    Color(0.17, 0.18, 0.165).lerp(
+                        Color(0.62, 0.16, 0.025),
+                        smoothstep(0.0, 1.0, damage) * 0.82
+                    ),
+                    0.86,
+                    0.30
+                )
 
 func _break_panel(index: int, direction: Vector3) -> void:
     var old := panels[index]
@@ -329,18 +341,14 @@ func _break_panel(index: int, direction: Vector3) -> void:
             local.y
         )
         debris.global_basis = transform.basis
-        var size_net: Vector3 = spec.get(
-            "size",
-            Vector3(CELL_SIZE, 0.24, CELL_SIZE)
+        var fragment_mass := maxf(
+            0.1,
+            float(spec.get("mass", 0.1))
         )
-        var fragment_size := Vector3(
-            maxf(0.22, size_net.x),
-            maxf(0.22, size_net.z),
-            maxf(0.18, size_net.y)
-        )
-        var fragment_mass := maxf(18.0, float(spec.get("mass", 24.0)))
-        debris.configure(
-            fragment_size,
+        debris.configure_fragment(
+            spec.get("hull", PackedVector2Array()),
+            0.24,
+            1,
             Color(0.13, 0.14, 0.13),
             fragment_mass,
             340.0,
@@ -355,19 +363,16 @@ func _break_panel(index: int, direction: Vector3) -> void:
             velocity_net.z,
             velocity_net.y
         )
-        var kick := minf(
-            sqrt(2.0 * fragment_mass * event_energy) * 0.12,
-            fragment_mass * 11.0
-        )
-        debris.apply_central_impulse(
-            direction.normalized() * kick
-            + Vector3.UP * fragment_mass * 0.55
-        )
         var angular_value: Variant = spec.get(
             "angular_velocity",
             Vector3.ZERO
         )
-        debris.angular_velocity += angular_value as Vector3
+        var angular_net := angular_value as Vector3
+        debris.angular_velocity = transform.basis * Vector3(
+            angular_net.x,
+            angular_net.z,
+            angular_net.y
+        )
 
     panel_health[index] = 0.0
     breached = true

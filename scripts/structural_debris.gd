@@ -46,6 +46,155 @@ func configure(
     set_meta("source_tag", tag)
     _build_segmented_body()
 
+
+func configure_fragment(
+        hull: PackedVector2Array,
+        fragment_thickness: float,
+        plane_mode: int,
+        color: Color,
+        mass_value: float,
+        hp: float,
+        tag: String
+) -> void:
+    if hull.size() < 3:
+        configure(
+            Vector3(0.5, fragment_thickness, 0.5),
+            color,
+            mass_value,
+            hp,
+            tag
+        )
+        return
+    mass = mass_value
+    toughness = hp
+    source_tag = tag
+    _base_color = color
+    var half_thickness := maxf(fragment_thickness, 0.04) * 0.5
+    var minimum := Vector2(INF, INF)
+    var maximum := Vector2(-INF, -INF)
+    for point in hull:
+        minimum.x = minf(minimum.x, point.x)
+        minimum.y = minf(minimum.y, point.y)
+        maximum.x = maxf(maximum.x, point.x)
+        maximum.y = maxf(maximum.y, point.y)
+    piece_size = (
+        Vector3(
+            maximum.x - minimum.x,
+            maximum.y - minimum.y,
+            half_thickness * 2.0
+        )
+        if plane_mode == 1
+        else Vector3(
+            maximum.x - minimum.x,
+            half_thickness * 2.0,
+            maximum.y - minimum.y
+        )
+    )
+    _axis_index = _longest_axis_index()
+    set_meta("load_size", piece_size)
+    set_meta("source_tag", tag)
+
+    var tool := SurfaceTool.new()
+    tool.begin(Mesh.PRIMITIVE_TRIANGLES)
+    for i in range(1, hull.size() - 1):
+        if plane_mode == 1:
+            _add_hull_triangle(
+                tool,
+                _hull_vertex(hull[0], half_thickness, plane_mode),
+                _hull_vertex(hull[i], half_thickness, plane_mode),
+                _hull_vertex(hull[i + 1], half_thickness, plane_mode)
+            )
+            _add_hull_triangle(
+                tool,
+                _hull_vertex(hull[0], -half_thickness, plane_mode),
+                _hull_vertex(hull[i + 1], -half_thickness, plane_mode),
+                _hull_vertex(hull[i], -half_thickness, plane_mode)
+            )
+        else:
+            _add_hull_triangle(
+                tool,
+                _hull_vertex(hull[0], half_thickness, plane_mode),
+                _hull_vertex(hull[i + 1], half_thickness, plane_mode),
+                _hull_vertex(hull[i], half_thickness, plane_mode)
+            )
+            _add_hull_triangle(
+                tool,
+                _hull_vertex(hull[0], -half_thickness, plane_mode),
+                _hull_vertex(hull[i], -half_thickness, plane_mode),
+                _hull_vertex(hull[i + 1], -half_thickness, plane_mode)
+            )
+    for i in hull.size():
+        var next := (i + 1) % hull.size()
+        var first_front := _hull_vertex(
+            hull[i], half_thickness, plane_mode
+        )
+        var second_front := _hull_vertex(
+            hull[next], half_thickness, plane_mode
+        )
+        var first_back := _hull_vertex(
+            hull[i], -half_thickness, plane_mode
+        )
+        var second_back := _hull_vertex(
+            hull[next], -half_thickness, plane_mode
+        )
+        _add_hull_triangle(
+            tool,
+            first_front,
+            first_back,
+            second_front
+        )
+        _add_hull_triangle(
+            tool,
+            second_front,
+            first_back,
+            second_back
+        )
+    tool.generate_normals()
+    var mesh := MeshInstance3D.new()
+    mesh.mesh = tool.commit()
+    var material := GeomUtil.material(color, 0.92, 0.30)
+    material.cull_mode = BaseMaterial3D.CULL_DISABLED
+    mesh.material_override = material
+    add_child(mesh)
+
+    var points := PackedVector3Array()
+    for point in hull:
+        points.append(_hull_vertex(
+            point, half_thickness, plane_mode
+        ))
+        points.append(_hull_vertex(
+            point, -half_thickness, plane_mode
+        ))
+    var shape := ConvexPolygonShape3D.new()
+    shape.points = points
+    var collision := CollisionShape3D.new()
+    collision.shape = shape
+    add_child(collision)
+
+
+func _hull_vertex(
+        point: Vector2,
+        depth: float,
+        plane_mode: int
+) -> Vector3:
+    if plane_mode == 1:
+        return Vector3(point.x, point.y, depth)
+    return Vector3(point.x, depth, point.y)
+
+
+func _add_hull_triangle(
+        tool: SurfaceTool,
+        first: Vector3,
+        second: Vector3,
+        third: Vector3
+) -> void:
+    tool.set_uv(Vector2(first.x, first.z))
+    tool.add_vertex(first)
+    tool.set_uv(Vector2(second.x, second.z))
+    tool.add_vertex(second)
+    tool.set_uv(Vector2(third.x, third.z))
+    tool.add_vertex(third)
+
 func _build_segmented_body() -> void:
     for mesh in _segment_meshes:
         if is_instance_valid(mesh):

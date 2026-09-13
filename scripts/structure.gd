@@ -10,6 +10,9 @@ const StructuralDebris = preload(
 const FractureNetwork = preload(
     "res://scripts/fracture_network.gd"
 )
+const DeformationSkin = preload(
+    "res://scripts/deformation_skin.gd"
+)
 
 signal structure_collapsed
 
@@ -26,13 +29,18 @@ var overload_ratio := 0.0
 var fatigue := 0.0
 var _overload_damage_bank := 0.0
 var deck_network: FractureNetwork
+var deck_skin: DeformationSkin3D
 var _network_damage_bank := 0.0
+var _last_damage_point := Vector3.ZERO
+var _last_damage_direction := Vector3.DOWN
 
 func _ready() -> void:
     add_to_group("structure")
     _build_frame()
 
 func _physics_process(delta: float) -> void:
+    if deck_skin != null:
+        deck_skin.refresh()
     if not collapsed:
         return
     collapse_age += delta
@@ -67,7 +75,19 @@ func _build_frame() -> void:
         4,
         Vector3(9.4, 0.0, 6.0),
         950.0,
-        235.0
+        235.0,
+        false,
+        0.34,
+        520.0
+    )
+    deck_skin = DeformationSkin.new()
+    deck_skin.name = "SolvedDeckSkin"
+    deck.add_child(deck_skin)
+    deck_skin.configure(
+        deck_network,
+        DeformationSkin.MODE_HORIZONTAL,
+        Color(0.24, 0.25, 0.23),
+        Vector3(0.0, 0.245, 0.0)
     )
 
     for x in [-4.15, -2.05, 0.0, 2.05, 4.15]:
@@ -134,7 +154,13 @@ func _make_support(index: int, pos: Vector3) -> StaticBody3D:
         support.add_child(plate)
     return support
 
-func damage_support(index: int, amount: float, direction: Vector3) -> void:
+func damage_support(
+        index: int,
+        amount: float,
+        direction: Vector3,
+        world_point: Vector3 = Vector3.ZERO,
+        source_energy: float = -1.0
+) -> void:
     if index < 0 or index >= support_health.size():
         return
     if support_health[index] <= 0.0:
@@ -146,11 +172,25 @@ func damage_support(index: int, amount: float, direction: Vector3) -> void:
         support_health[index] - effective_amount
     )
     if deck_network != null and is_instance_valid(supports[index]):
-        deck_network.apply_force(
-            to_local(supports[index].global_position),
-            direction.normalized() * effective_amount * 46.0
+        var hit_point := world_point
+        if hit_point == Vector3.ZERO:
+            hit_point = supports[index].global_position
+        var local_point := deck.to_local(hit_point)
+        local_point = Vector3(local_point.x, 0.0, local_point.z)
+        var local_direction := deck.global_basis.inverse() * direction
+        var impact_energy := source_energy
+        if impact_energy < 0.0:
+            impact_energy = effective_amount * effective_amount * 0.65
+        _last_damage_point = local_point
+        _last_damage_direction = local_direction.normalized()
+        deck_network.apply_impact(
+            local_point,
+            local_direction.normalized() * effective_amount * 62.0,
+            impact_energy
         )
         deck_network.step(1.0 / 60.0)
+        if deck_skin != null:
+            deck_skin.refresh()
     var support: StaticBody3D = supports[index]
     if is_instance_valid(support):
         support.rotation.z += (
@@ -162,7 +202,13 @@ func damage_support(index: int, amount: float, direction: Vector3) -> void:
     _update_support_material(index)
     ImpactFx.spawn(
         get_parent(),
-        supports[index].global_position + Vector3.UP * 1.1 if is_instance_valid(supports[index]) else global_position,
+        world_point
+        if world_point != Vector3.ZERO
+        else (
+            supports[index].global_position + Vector3.UP * 1.1
+            if is_instance_valid(supports[index])
+            else global_position
+        ),
         direction,
         Color(0.92, 0.56, 0.12),
         clampf(effective_amount / 22.0, 0.8, 3.2),
@@ -243,7 +289,20 @@ func _evaluate_failure() -> void:
             alive += 1
     if alive <= 2:
         if deck_network != null:
-            deck_network.fracture_into_columns()
+            var lost_capacity := 0.0
+            for hp in support_health:
+                lost_capacity += 100.0 - float(hp)
+            var collapse_energy := (
+                deck.mass * 9.81 * 2.2
+                + live_load_mass * 9.81 * 1.4
+                + lost_capacity * 62.0
+            )
+            deck_network.fracture_by_energy(
+                _last_damage_point,
+                _last_damage_direction + Vector3.DOWN * 0.72,
+                collapse_energy,
+                7
+            )
             deck_network.step(0.024)
         collapsed = true
         collapse_age = 0.0
@@ -255,6 +314,9 @@ func _evaluate_failure() -> void:
 
 func _spawn_aftermath() -> void:
     if deck_network != null:
+        var deck_transform := deck.global_transform
+        var deck_linear_velocity := deck.linear_velocity
+        var deck_angular_velocity := deck.angular_velocity
         deck.freeze = true
         deck.visible = false
         deck.collision_layer = 0
@@ -264,27 +326,32 @@ func _spawn_aftermath() -> void:
             for i in procedural_specs.size():
                 var spec: Dictionary = procedural_specs[i]
                 var body := StructuralDebris.new()
-                body.position = spec.local_position
-                add_child(body)
-                body.configure(
-                    spec.size,
+                get_parent().add_child(body)
+                var local_position := spec.local_position as Vector3
+                body.global_position = deck_transform * local_position
+                body.global_basis = deck_transform.basis
+                body.configure_fragment(
+                    spec.hull,
+                    0.34,
+                    0,
                     Color(0.27, 0.25, 0.20),
-                    maxf(18.0, float(spec.mass)),
+                    maxf(0.1, float(spec.mass)),
                     180.0,
                     "platform"
                 )
+                var world_offset := (
+                    deck_transform.basis * local_position
+                )
                 body.linear_velocity = (
-                    spec.linear_velocity
-                    + Vector3(
-                        (-1.0 if i % 2 == 0 else 1.0)
-                        * (1.8 + float(i) * 0.35),
-                        2.2 + float(i) * 0.32,
-                        (float(i) - 2.0) * 0.55
-                    )
+                    deck_linear_velocity
+                    + deck_transform.basis
+                    * (spec.linear_velocity as Vector3)
+                    + deck_angular_velocity.cross(world_offset)
                 )
                 body.angular_velocity = (
-                    spec.angular_velocity
-                    + Vector3(0.0, 0.35 * float(i % 2), 0.0)
+                    deck_angular_velocity
+                    + deck_transform.basis
+                    * (spec.angular_velocity as Vector3)
                 )
             return
     var pieces: Array = [
@@ -341,10 +408,13 @@ func apply_world_loads(loads: Array, delta: float) -> void:
                     0.5 * body_mass * down_speed * down_speed
                 )
             if deck_network != null:
+                var deck_local := deck.to_local(body.global_position)
                 deck_network.apply_force(
-                    local,
-                    Vector3.DOWN * body_mass * 9.81
-                    + body.linear_velocity * body_mass * 3.4
+                    Vector3(deck_local.x, 0.0, deck_local.z),
+                    deck.global_basis.inverse() * (
+                        Vector3.DOWN * body_mass * 9.81
+                        + body.linear_velocity * body_mass * 3.4
+                    )
                 )
         if local.y > 1.65 or body_mass < 55.0:
             continue
@@ -400,6 +470,8 @@ func apply_world_loads(loads: Array, delta: float) -> void:
         damage_support(weakest, damage, Vector3.DOWN)
     if deck_network != null:
         deck_network.step(delta)
+        if deck_skin != null:
+            deck_skin.refresh()
         var deformation := deck_network.get_deformation_state()
         _network_damage_bank += (
             float(deformation.damage) * delta * 2.4

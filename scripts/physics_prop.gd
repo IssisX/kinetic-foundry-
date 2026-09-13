@@ -101,8 +101,31 @@ func get_load_profile() -> Dictionary:
         "source": "yard_prop"
     }
 
-func machine_hit(amount: float, direction: Vector3) -> void:
-    _receive_impact(amount * 1.35, direction, 14.0)
+func machine_hit(
+        amount: float,
+        direction: Vector3,
+        world_point: Vector3 = Vector3.ZERO
+) -> void:
+    _receive_impact(
+        amount * 1.35,
+        direction,
+        14.0,
+        world_point
+    )
+
+
+func machine_hit_at(
+        amount: float,
+        direction: Vector3,
+        world_point: Vector3,
+        impact_energy: float
+) -> void:
+    _receive_impact(
+        amount * 1.35,
+        direction,
+        sqrt(maxf(impact_energy, 0.0)),
+        world_point
+    )
 
 func take_hit(force: Vector3, damage: float) -> void:
     if held:
@@ -110,17 +133,32 @@ func take_hit(force: Vector3, damage: float) -> void:
     var dir := force
     if dir.length_squared() < 0.001:
         dir = Vector3.UP
-    _receive_impact(damage, dir.normalized(), force.length())
+    _receive_impact(
+        damage,
+        dir.normalized(),
+        force.length(),
+        global_position
+    )
 
-func _receive_impact(damage: float, direction: Vector3, impulse_strength: float) -> void:
+func _receive_impact(
+        damage: float,
+        direction: Vector3,
+        impulse_strength: float,
+        world_point: Vector3
+) -> void:
     if destroyed:
         return
     sleeping = false
     health -= damage
     var impulse := direction.normalized() * maxf(impulse_strength, damage * 0.22)
     impulse += Vector3.UP * minf(damage * 0.055, 4.2)
-    apply_central_impulse(impulse * mass * 0.18 * impact_scale)
-    apply_torque_impulse(Vector3(direction.z, 0.35, -direction.x) * damage * mass * 0.025)
+    var point := world_point
+    if point == Vector3.ZERO:
+        point = global_position
+    apply_impulse(
+        impulse * mass * 0.18 * impact_scale,
+        to_local(point)
+    )
     ImpactFx.spawn(get_parent(), global_position + Vector3.UP * 0.45, direction, impact_color, clampf(damage / 20.0, 0.7, 3.5), 7)
     if health <= 0.0:
         _destroy(direction)

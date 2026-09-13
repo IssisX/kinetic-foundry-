@@ -215,7 +215,11 @@ func receive_hazard_hit(damage: float, impulse: Vector3) -> void:
     velocity += impulse * 0.22
     _apply_machine_damage(damage * 0.72, impulse.normalized() if impulse.length_squared() > 0.01 else Vector3.UP)
 
-func machine_hit(amount: float, direction: Vector3) -> void:
+func machine_hit(
+        amount: float,
+        direction: Vector3,
+        _world_point: Vector3 = Vector3.ZERO
+) -> void:
     velocity += direction.normalized() * minf(amount * 0.018, 3.8)
     _apply_machine_damage(amount * 0.58, direction)
 
@@ -425,7 +429,12 @@ func _react_to_arm_contacts(contacts: Array[Node]) -> void:
     var damaged := false
     for collider in contacts:
         if collider.has_method("machine_hit"):
-            collider.machine_hit(force, direction)
+            _deliver_machine_hit(
+                collider,
+                force,
+                direction,
+                _tool.global_position
+            )
             damaged = true
     velocity -= direction * minf(force * 0.010, 1.6)
     _arm_contact_cooldown = 0.12 if damaged else 0.07
@@ -557,7 +566,12 @@ func _resolve_tool_impacts() -> void:
         if body == self or body == held_load:
             continue
         if body.has_method("machine_hit"):
-            body.machine_hit(force, impact_dir)
+            _deliver_machine_hit(
+                body,
+                force,
+                impact_dir,
+                _tool.global_position
+            )
             _impact_cooldown = 0.15
         elif body.has_method("take_hit"):
             var push := impact_dir * (10.0 + minf(_tool_tip_speed, 12.0)) + Vector3.UP * 4.5
@@ -566,6 +580,33 @@ func _resolve_tool_impacts() -> void:
         elif body is RigidBody3D and not body.freeze:
             body.apply_impulse(impact_dir * minf(force * body.mass * 0.035, 2200.0), body.to_local(_tool.global_position))
             _impact_cooldown = 0.12
+
+
+func _deliver_machine_hit(
+        body: Node,
+        amount: float,
+        direction: Vector3,
+        world_point: Vector3
+) -> void:
+    var effective_mass := 360.0
+    if is_holding_load():
+        effective_mass += float(held_load.get("mass"))
+    var relative_speed := maxf(
+        _tool_tip_speed,
+        Vector3(velocity.x, 0.0, velocity.z).length()
+    )
+    var impact_energy := (
+        0.5 * effective_mass * relative_speed * relative_speed
+    )
+    if body.has_method("machine_hit_at"):
+        body.machine_hit_at(
+            amount,
+            direction,
+            world_point,
+            impact_energy
+        )
+    else:
+        body.machine_hit(amount, direction)
 
 func _update_damage_fx() -> void:
     if get_health_ratio() > 0.58 or _damage_fx_cooldown > 0.0:
