@@ -3,6 +3,12 @@ extends RigidBody3D
 
 const GeomUtil = preload("res://scripts/geom.gd")
 const ImpactFx = preload("res://scripts/impact_fx.gd")
+const FoundryMaterial = preload("res://scripts/foundry_material.gd")
+const EnergyPartition = preload("res://scripts/energy_partition.gd")
+
+const LIVE_SPEED := 1.35
+const CONTACT_SPEED := 2.15
+const WAKE_SPEED := 0.55
 
 var health := 80.0
 var destroyed := false
@@ -17,14 +23,17 @@ var _saved_linear_damp := 0.0
 var _saved_angular_damp := 0.0
 var _flight_time := 0.0
 var _flight_source: Node
+var _contact_cooldown := 0.0
+var _last_contact_id := 0
 
 func _ready() -> void:
     add_to_group("physics_prop")
+    add_to_group("physical_event_listener")
     collision_layer = 8
     collision_mask = 1 | 2 | 4 | 8
     sleeping = true
     can_sleep = true
-    set_physics_process(false)
+    set_physics_process(true)
 
 
 ## A thrown crate is a weapon. Anyone who can pick this up can launch it,
@@ -41,75 +50,139 @@ func launch(throw_velocity: Vector3, source: Node = null) -> void:
     ) * 0.22
     _flight_source = source
     _flight_time = 2.4
-    contact_monitor = true
-    max_contacts_reported = 4
-    # A thrown crate crosses a thin gate panel in under one tick at throw
-    # speed; CCD is the cheap fix, paid only while actually in flight.
-    continuous_cd = true
-    if not body_entered.is_connected(_on_flight_contact):
-        body_entered.connect(_on_flight_contact)
+    _arm_contact_sense()
     set_physics_process(true)
 
 
 func _physics_process(delta: float) -> void:
-    if _flight_time <= 0.0:
-        set_physics_process(false)
-        return
-    _flight_time -= delta
-    if _flight_time <= 0.0:
-        _end_flight()
+    _contact_cooldown = maxf(0.0, _contact_cooldown - delta)
+    if _flight_time > 0.0:
+        _flight_time -= delta
+        if _flight_time <= 0.0:
+            _end_flight()
 
-
-func _on_flight_contact(body: Node) -> void:
-    if _flight_time <= 0.0 or body == self or body == _flight_source:
+    if destroyed or (held and not machine_held):
         return
+    if sleeping and not machine_held and _flight_time <= 0.0:
+        return
+
     var speed := linear_velocity.length()
-    if speed < 3.0:
-        _end_flight()
+    if speed >= LIVE_SPEED or machine_held:
+        sleeping = false
+        can_sleep = false
+        continuous_cd = true
+        _arm_contact_sense()
+    elif speed < WAKE_SPEED and not machine_held:
+        continuous_cd = false
+        can_sleep = true
+
+
+func _arm_contact_sense() -> void:
+    contact_monitor = true
+    max_contacts_reported = 8
+    continuous_cd = true
+    if not body_entered.is_connected(_on_live_contact):
+        body_entered.connect(_on_live_contact)
+
+
+func _on_live_contact(body: Node) -> void:
+    if destroyed or body == null or body == self or body == _flight_source:
+        return
+    if held and not machine_held:
+        return
+    if machine_held and body.is_in_group("machine"):
+        return
+    if _contact_cooldown > 0.0 and body.get_instance_id() == _last_contact_id:
         return
 
-    var direction := linear_velocity / speed
-    var energy := EnergyPartition.collision_energy(
-        mass,
-        _struck_mass(body),
-        speed
-    )
-    MaterialResponse.impact(
-        body,
-        global_position,
-        direction,
-        energy,
-        mass,
-        MaterialResponse.material_of(self, FoundryMaterial.TIMBER),
-        {"area": 0.12, "radius": 3.4}
-    )
+    var relative := linear_velocity.length()
+    if body is RigidBody3D:
+        relative = (linear_velocity - (body as RigidBody3D).linear_velocity).length()
+    if relative < CONTACT_SPEED:
+        if _flight_time > 0.0:
+            _end_flight()
+        return
 
-    var damage := clampf(energy / 260.0, 6.0, 70.0)
-    if body.has_method("take_hit"):
-        body.take_hit(direction * minf(speed * 0.9, 16.0) + Vector3.UP * 2.2, damage)
-    elif body.has_method("machine_hit_at"):
-        body.machine_hit_at(damage, direction, global_position, energy)
+    var direction := linear_velocity
+    if direction.length_squared() < 0.001:
+        direction = Vector3.DOWN
+    else:
+        direction = direction.normalized()
+    var point := global_position
+    if body is Node3D:
+        point = global_position.lerp((body as Node3D).global_position, 0.5)
+
+    var consequence := MaterialResponse.collide(
+        self,
+        body,
+        point,
+        direction,
+        relative,
+        {
+            "tool_material": _material_id(),
+            "area": 0.14,
+            "novelty": 0.78
+        }
+    )
+    var energy := float(consequence.get("energy", 0.0))
+    var damage := clampf(energy / 260.0, 4.0, 90.0)
+    if body.has_method("machine_hit_at"):
+        body.machine_hit_at(damage, direction, point, energy)
     elif body.has_method("machine_hit"):
-        body.machine_hit(damage, direction, global_position)
+        body.machine_hit(damage, direction)
+    elif body.has_method("take_hit"):
+        body.take_hit(
+            direction * minf(relative * 0.9, 16.0) + Vector3.UP * 2.2,
+            damage
+        )
     elif body.has_method("receive_enemy_hit"):
         body.receive_enemy_hit(damage)
-    _end_flight()
+
+    _contact_cooldown = 0.10
+    _last_contact_id = body.get_instance_id()
+    if _flight_time > 0.0:
+        _end_flight()
 
 
-func _struck_mass(body: Node) -> float:
-    if body is RigidBody3D:
-        return maxf((body as RigidBody3D).mass, 1.0)
-    if body is CharacterBody3D:
-        return 92.0
-    return 900.0
+func physical_event(event: Dictionary) -> void:
+    if destroyed or held or not sleeping:
+        return
+    var event_position_value: Variant = event.get("position", global_position)
+    var event_position := event_position_value as Vector3
+    var radius := maxf(float(event.get("radius", 0.0)), 0.0)
+    var distance := global_position.distance_to(event_position)
+    if distance > radius + 2.4:
+        return
+    var energy := float(event.get("energy_in", 0.0))
+    var kinetic := float(event.get("kinetic_energy", energy * 0.28))
+    if kinetic < 35.0 and energy < 180.0:
+        return
+    sleeping = false
+    can_sleep = false
+    _arm_contact_sense()
+    var falloff := 1.0 - clampf(
+        distance / maxf(radius + 2.4, 0.001),
+        0.0,
+        1.0
+    )
+    if falloff < 0.08:
+        return
+    var away := global_position - event_position
+    if away.length_squared() < 0.01:
+        away = Vector3.UP
+    away = away.normalized()
+    away.y = maxf(away.y, 0.16)
+    var impulse := EnergyPartition.kinetic_impulse(
+        mass,
+        kinetic * falloff * 0.32
+    )
+    apply_central_impulse(away.normalized() * impulse)
 
 
 func _end_flight() -> void:
     _flight_time = 0.0
     _flight_source = null
-    contact_monitor = false
-    continuous_cd = false
-    set_physics_process(false)
+
 
 func configure_box(size: Vector3, color: Color, mass_value: float = 75.0, hp: float = 80.0) -> void:
     mass = mass_value
@@ -179,6 +252,7 @@ func set_machine_held(value: bool) -> void:
         can_sleep = false
         sleeping = false
         continuous_cd = true
+        _arm_contact_sense()
         linear_damp = maxf(linear_damp, 3.2)
         angular_damp = maxf(angular_damp, 3.8)
         return
@@ -203,7 +277,10 @@ func get_load_profile() -> Dictionary:
     return {
         "mass": mass,
         "size": source_size,
-        "kinetic_energy": 0.5 * mass * linear_velocity.length_squared(),
+        "kinetic_energy": EnergyPartition.against_world(
+            mass,
+            linear_velocity.length()
+        ),
         "brace_quality": clampf(longest / shortest / 12.0, 0.15, 1.0),
         "plastic_strain": 0.0,
         "source": "yard_prop"
@@ -257,6 +334,7 @@ func _receive_impact(
     if destroyed:
         return
     sleeping = false
+    _arm_contact_sense()
     health -= damage
     var impulse := direction.normalized() * maxf(impulse_strength, damage * 0.22)
     impulse += Vector3.UP * minf(damage * 0.055, 4.2)
@@ -277,10 +355,12 @@ func _destroy(direction: Vector3) -> void:
     angular_damp = 0.12
     ImpactFx.spawn(get_parent(), global_position + Vector3.UP * 0.35, direction, impact_color, 3.4, 13)
     _spawn_fragments(direction)
+    MaterialResponse.forget(self)
     visible = false
     collision_layer = 0
     collision_mask = 0
     freeze = true
+    queue_free()
 
 func _spawn_fragments(direction: Vector3) -> void:
     var parent := get_parent()
@@ -290,9 +370,8 @@ func _spawn_fragments(direction: Vector3) -> void:
     var fragment_count := 5 if barrel_shape else 4
     var leftover := float(
         EnergyPartition.split(
-            EnergyPartition.collision_energy(
+            EnergyPartition.against_world(
                 mass,
-                900.0,
                 maxf(linear_velocity.length(), 3.5)
             )
         ).kinetic
@@ -304,7 +383,7 @@ func _spawn_fragments(direction: Vector3) -> void:
             0.18 + float(i % 3) * 0.10,
             (float((i + 1) % 2) - 0.5) * source_size.z * 0.35
         )
-        var piece_mass := maxf(4.0, mass / float(fragment_count) * 0.48)
+        var piece_mass := mass / float(fragment_count)
         var chunk_size := Vector3(
             maxf(0.18, source_size.x * (0.34 if barrel_shape else 0.42)),
             maxf(0.16, source_size.y * 0.26),
@@ -318,7 +397,7 @@ func _spawn_fragments(direction: Vector3) -> void:
             maxf(18.0, health * 0.28)
         )
         MaterialResponse.adopt_fragment(piece, parent_state, 0.55)
-        piece.continuous_cd = true
+        piece._arm_contact_sense()
         var share := leftover / float(fragment_count)
         var speed := sqrt(2.0 * share / maxf(piece.mass, 0.001))
         var scatter := Vector3(

@@ -8,6 +8,8 @@ const StructuralDebris = preload(
 const PrecisionFractureNetwork = preload(
     "res://scripts/precision_fracture_network.gd"
 )
+const FoundryMaterial = preload("res://scripts/foundry_material.gd")
+const EnergyPartition = preload("res://scripts/energy_partition.gd")
 
 const PANEL_SIZE := 4.0
 const GRID_NODES := 7
@@ -445,8 +447,9 @@ func apply_world_loads(loads: Array, delta: float) -> void:
         wedge_side += signf(local.x) * body_mass
         if body is RigidBody3D:
             var normal_speed := absf(body.linear_velocity.z)
-            var kinetic_energy := (
-                0.5 * body_mass * normal_speed * normal_speed
+            var kinetic_energy := EnergyPartition.against_world(
+                body_mass,
+                normal_speed
             )
             if kinetic_energy > strongest_energy:
                 strongest_energy = kinetic_energy

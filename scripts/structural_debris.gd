@@ -2,6 +2,9 @@ class_name StructuralDebris
 extends RigidBody3D
 
 const GeomUtil = preload("res://scripts/geom.gd")
+const FoundryMaterial = preload("res://scripts/foundry_material.gd")
+const EnergyPartition = preload("res://scripts/energy_partition.gd")
+const SurfaceState = preload("res://scripts/surface_state.gd")
 
 var held := false
 var surface_state: SurfaceState
@@ -22,10 +25,13 @@ var _segment_centers: Array[Vector3] = []
 var _segment_base_sizes: Array[Vector3] = []
 var _segment_damage: Array[float] = []
 var _fracturing := false
+var _contact_cooldown := 0.0
+var _last_contact_id := 0
 
 func _ready() -> void:
     add_to_group("physics_prop")
     add_to_group("reusable_debris")
+    add_to_group("physical_event_listener")
     collision_layer = 8
     collision_mask = 1 | 2 | 4 | 8
     can_sleep = true
@@ -33,6 +39,11 @@ func _ready() -> void:
     # exactly when it is most likely to cross a thin gate panel or deck
     # skin in under one tick. CCD costs nothing once the body sleeps.
     continuous_cd = true
+    contact_monitor = true
+    max_contacts_reported = 8
+    if not body_entered.is_connected(_on_live_contact):
+        body_entered.connect(_on_live_contact)
+    set_physics_process(true)
 
 func configure(
         size: Vector3,
@@ -247,6 +258,97 @@ func _build_segmented_body() -> void:
         _segment_base_sizes.append(size)
         _segment_damage.append(0.0)
 
+func _physics_process(delta: float) -> void:
+    _contact_cooldown = maxf(0.0, _contact_cooldown - delta)
+    if held and not machine_held:
+        return
+    var speed := linear_velocity.length()
+    if speed >= 1.35 or machine_held:
+        sleeping = false
+        can_sleep = false
+        continuous_cd = true
+    elif speed < 0.55 and not machine_held:
+        continuous_cd = false
+        can_sleep = true
+
+
+func _on_live_contact(body: Node) -> void:
+    if _fracturing or body == null or body == self:
+        return
+    if held and not machine_held:
+        return
+    if machine_held and body.is_in_group("machine"):
+        return
+    if _contact_cooldown > 0.0 and body.get_instance_id() == _last_contact_id:
+        return
+    var relative := linear_velocity.length()
+    if body is RigidBody3D:
+        relative = (linear_velocity - (body as RigidBody3D).linear_velocity).length()
+    if relative < 2.15:
+        return
+    var direction := (
+        linear_velocity.normalized()
+        if linear_velocity.length_squared() > 0.001
+        else Vector3.DOWN
+    )
+    var point := global_position
+    if body is Node3D:
+        point = global_position.lerp((body as Node3D).global_position, 0.5)
+    var consequence := MaterialResponse.collide(
+        self,
+        body,
+        point,
+        direction,
+        relative,
+        {
+            "tool_material": material_identity(),
+            "type": "debris_impact",
+            "novelty": 0.80
+        }
+    )
+    var energy := float(consequence.get("energy", 0.0))
+    var damage := clampf(energy / 260.0, 4.0, 90.0)
+    if body.has_method("machine_hit_at"):
+        body.machine_hit_at(damage, direction, point, energy)
+    elif body.has_method("machine_hit"):
+        body.machine_hit(damage, direction)
+    elif body.has_method("take_hit"):
+        body.take_hit(direction * minf(relative, 14.0) + Vector3.UP * 1.8, damage)
+    _contact_cooldown = 0.10
+    _last_contact_id = body.get_instance_id()
+
+
+func physical_event(event: Dictionary) -> void:
+    if _fracturing or held or not sleeping:
+        return
+    var event_position_value: Variant = event.get("position", global_position)
+    var event_position := event_position_value as Vector3
+    var radius := maxf(float(event.get("radius", 0.0)), 0.0)
+    var distance := global_position.distance_to(event_position)
+    if distance > radius + 2.4:
+        return
+    var kinetic := float(event.get("kinetic_energy", 0.0))
+    if kinetic < 40.0:
+        return
+    sleeping = false
+    can_sleep = false
+    continuous_cd = true
+    var falloff := 1.0 - clampf(
+        distance / maxf(radius + 2.4, 0.001),
+        0.0,
+        1.0
+    )
+    var away := global_position - event_position
+    if away.length_squared() < 0.01:
+        away = Vector3.UP
+    away = away.normalized()
+    away.y = maxf(away.y, 0.16)
+    apply_central_impulse(
+        away.normalized()
+        * EnergyPartition.kinetic_impulse(mass, kinetic * falloff * 0.28)
+    )
+
+
 func set_held(value: bool) -> void:
     held = value
     machine_held = false
@@ -315,7 +417,7 @@ func take_hit(force: Vector3, damage: float) -> void:
         direction,
         force.length(),
         global_position,
-        0.5 * mass * force.length_squared() / maxf(mass * mass, 1.0)
+        EnergyPartition.against_world(mass, force.length())
     )
 
 func _receive_energy(
@@ -612,7 +714,10 @@ func get_load_profile() -> Dictionary:
     return {
         "mass": mass,
         "size": piece_size,
-        "kinetic_energy": 0.5 * mass * velocity_sq,
+        "kinetic_energy": EnergyPartition.against_world(
+            mass,
+            linear_velocity.length()
+        ),
         "brace_quality": _brace_quality(),
         "plastic_strain": plastic_strain,
         "source": source_tag,

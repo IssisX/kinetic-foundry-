@@ -13,6 +13,8 @@ const FractureNetwork = preload(
 const DeformationSkin = preload(
     "res://scripts/deformation_skin.gd"
 )
+const FoundryMaterial = preload("res://scripts/foundry_material.gd")
+const EnergyPartition = preload("res://scripts/energy_partition.gd")
 
 signal structure_collapsed
 
@@ -478,8 +480,9 @@ func apply_world_loads(loads: Array, delta: float) -> void:
                     0.0,
                     -body.linear_velocity.y
                 )
-                impact_energy += (
-                    0.5 * body_mass * down_speed * down_speed
+                impact_energy += EnergyPartition.against_world(
+                    body_mass,
+                    down_speed
                 )
             if deck_network != null:
                 var deck_local := deck.to_local(body.global_position)

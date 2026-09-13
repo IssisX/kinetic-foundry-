@@ -349,8 +349,14 @@ func _react_to_arm_contacts(contacts: Array[Node]) -> void:
         return
     var direction := _tool_tip_velocity.normalized() if _tool_tip_velocity.length_squared() > 0.04 else -_tool.global_basis.z
     var force := get_tool_force()
+    var load_hits: Array[Node] = []
+    if held_load is CollisionObject3D:
+        var exclude: Array[RID] = [get_rid(), held_load.get_rid()]
+        _append_body_contacts(held_load, ARM_CONTACT_MASK, exclude, load_hits)
     var damaged := false
     for collider in contacts:
+        if load_hits.has(collider):
+            continue
         if collider.has_method("machine_hit"):
             _deliver_machine_hit(
                 collider,

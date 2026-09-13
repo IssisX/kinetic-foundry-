@@ -1,6 +1,8 @@
 class_name SurfaceState
 extends RefCounted
 
+const FoundryMaterial = preload("res://scripts/foundry_material.gd")
+
 ## What has happened to one surface, kept as independent physical channels.
 ##
 ## Damage is never reduced to a single scalar here. Each channel has its own

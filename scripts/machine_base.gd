@@ -1,6 +1,9 @@
 class_name FoundryMachine
 extends CharacterBody3D
 
+const FoundryMaterial = preload("res://scripts/foundry_material.gd")
+const EnergyPartition = preload("res://scripts/energy_partition.gd")
+
 ## What every heavy machine in the yard shares.
 ##
 ## Occupancy, hijacking, damage, and holding a load are not excavator

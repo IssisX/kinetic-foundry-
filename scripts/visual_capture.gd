@@ -182,14 +182,25 @@ func _stage_structure_damage() -> void:
     _camera(Vector3(22.0, 10.5, -3.0), game.structure.global_position + Vector3(0.0, 2.5, 0.0), 50.0)
 
 func _stage_structure_collapse() -> void:
+    _release_capture_load()
+    var beam = _heaviest_prop()
+    if beam != null and is_instance_valid(beam):
+        beam.sleeping = false
+        beam.freeze = false
+        beam.global_position = (
+            game.structure.global_position
+            + Vector3(-0.8, 6.2, 0.35)
+        )
+        beam.linear_velocity = Vector3(1.4, -7.2, 0.2)
+        beam.angular_velocity = Vector3(0.6, 0.2, -0.4)
     game.structure.damage_support(0, 55.0, Vector3(1.0, 0.0, 0.25))
     game.structure.damage_support(2, 90.0, Vector3(1.0, 0.0, -0.20))
     game.mission.stage = 3
     _clear_machine_hud()
     game.hud.set_target(null)
-    game.hud.set_objective("OWN THE WRECKAGE", "COLLAPSE BECOMES TERRAIN // HOLD THE SPACE")
+    game.hud.set_objective("OWN THE WRECKAGE", "420 KG FALLS WITH THE DECK // COLLAPSE BECOMES TERRAIN")
     game.hud.set_objective_progress(0.63)
-    game.hud.set_context("PERSISTENT DEBRIS // NEW COVER // NEW ROUTE")
+    game.hud.set_context("CHAIN REACTION // MASS KEEPS MOVING")
     _camera(Vector3(22.0, 8.0, -4.5), game.structure.global_position + Vector3(0.0, 1.5, 0.0), 54.0)
 
 func _stage_breach_gate() -> void:

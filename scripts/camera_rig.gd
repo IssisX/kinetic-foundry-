@@ -4,8 +4,8 @@ extends Node3D
 const PhysicsAudioScene = preload("res://scripts/physics_audio.gd")
 
 const CAMERA_COLLISION_MASK := 1 | 2 | 8
-const EVENT_MAX_BLEND := 0.42
-const EVENT_MAX_DISTANCE := 42.0
+const EVENT_MAX_BLEND := 0.50
+const EVENT_MAX_DISTANCE := 48.0
 
 var target: Node3D
 var yaw := 0.0
@@ -157,12 +157,17 @@ func physical_event(event: Dictionary) -> void:
         compose_collapse(event_position, maxf(radius, 8.0))
     elif salience >= 0.20:
         compose_impact(event_position, salience)
-        if _machine_view and (event_type == "fracture" or salience >= 0.45):
+        if _machine_view and (
+            event_type == "fracture"
+            or event_type == "collapse"
+            or salience >= 0.38
+            or float(event.get("energy_in", 0.0)) >= 2200.0
+        ):
             _queue_event(
                 event_position,
                 salience,
                 clampf(radius / 14.0, 0.20, 1.0),
-                lerpf(0.55, 1.05, salience)
+                lerpf(0.55, 1.15, salience)
             )
 
 func compose_impact(world_position: Vector3, salience: float) -> void:
@@ -212,11 +217,21 @@ func _queue_event(
         return
     if target.global_position.distance_to(world_position) > EVENT_MAX_DISTANCE:
         return
-    if (
-        _event_remaining > 0.0
-        and salience < _event_salience * 0.82
-    ):
-        return
+    if _event_remaining > 0.0:
+        var nearby := world_position.distance_to(_event_point) < 12.0
+        if salience < _event_salience * 0.82:
+            if nearby and salience >= 0.16:
+                _event_point = _event_point.lerp(world_position, 0.42)
+                _event_remaining = maxf(_event_remaining, duration * 0.70)
+                _event_scale = maxf(_event_scale, clampf(scale, 0.0, 1.0))
+            return
+        if nearby:
+            _event_point = _event_point.lerp(world_position, 0.70)
+            _event_remaining = maxf(_event_remaining, 0.18) + duration * 0.55
+            _event_salience = clampf(salience, 0.0, 1.0)
+            _event_scale = clampf(maxf(_event_scale, scale), 0.0, 1.0)
+            _event_duration = maxf(_event_duration, duration)
+            return
     _event_point = world_position
     _event_salience = clampf(salience, 0.0, 1.0)
     _event_scale = clampf(scale, 0.0, 1.0)
