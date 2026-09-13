@@ -227,6 +227,20 @@ func set_target(node: Node3D) -> void:
     target = node
 
 
+## Same coupling as the player: an oiled or wet patch costs grip, not just
+## the body standing directly on the leak.
+func _ground_traction() -> float:
+    if not is_on_floor():
+        return 1.0
+    var collision := get_last_slide_collision()
+    if collision == null:
+        return 1.0
+    var collider := collision.get_collider()
+    if collider == null:
+        return 1.0
+    return MaterialResponse.traction_at(collider)
+
+
 func take_hit(force: Vector3, damage: float) -> void:
     if dead:
         return
@@ -435,8 +449,9 @@ func _physics_process(delta: float) -> void:
         var move_dir := (
             dir + tangent * flank_weight + separation * 0.85
         ).normalized()
-        velocity.x = move_toward(velocity.x, move_dir.x * speed, 18.0 * delta)
-        velocity.z = move_toward(velocity.z, move_dir.z * speed, 18.0 * delta)
+        var ground_speed := speed * _ground_traction()
+        velocity.x = move_toward(velocity.x, move_dir.x * ground_speed, 18.0 * delta)
+        velocity.z = move_toward(velocity.z, move_dir.z * ground_speed, 18.0 * delta)
         rotation.y = rotate_toward(
             rotation.y,
             atan2(-dir.x, -dir.z),

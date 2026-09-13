@@ -105,6 +105,7 @@ func _build_frame() -> void:
         Vector3(0.0, 0.245, 0.0),
         FoundryMaterial.STRUCTURAL_STEEL
     )
+    deck_skin.bind_resonance_source(deck)
     deck_skin.bind_surface_state(
         MaterialResponse.register(
             deck,
@@ -220,6 +221,7 @@ func damage_support(
             impact_energy
         )
         deck_network.step(1.0 / 60.0)
+        MaterialResponse.excite_resonance(deck, DECK_MASS, impact_energy)
         if deck_skin != null:
             deck_skin.refresh()
     var support: StaticBody3D = supports[index]

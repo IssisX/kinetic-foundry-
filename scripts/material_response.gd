@@ -10,6 +10,7 @@ extends Node
 
 const ImpactFxScript = preload("res://scripts/impact_fx.gd")
 const MaterialFxScript = preload("res://scripts/material_fx.gd")
+const ModalResonatorScript = preload("res://scripts/modal_resonator.gd")
 
 const EVENT_IMPACT := "impact"
 const EVENT_SCRAPE := "scrape"
@@ -28,6 +29,7 @@ const SCRAPE_EVENT_JOULES := 420.0
 
 var _surfaces: Dictionary = {}
 var _scrape_bank: Dictionary = {}
+var _resonators: Dictionary = {}
 var _decay_clock := 0.0
 var _live_fx := 0
 var _events_this_second := 0
@@ -45,6 +47,8 @@ func _process(delta: float) -> void:
         _event_rate = float(_events_this_second) / _event_clock
         _events_this_second = 0
         _event_clock = 0.0
+
+    _step_resonators(delta)
 
     _decay_clock += delta
     if _decay_clock < DECAY_INTERVAL:
@@ -134,6 +138,7 @@ func impact(
         area,
         float(options.get("fracture", 0.0))
     )
+    _excite(target, mass, float(terms.acoustic))
     _spawn_effects(target, world_point, direction, state, consequence, pairing)
     _emit(
         str(options.get("type", EVENT_IMPACT)),
@@ -397,6 +402,76 @@ func _tick_surfaces(delta: float) -> void:
     for key in dead:
         _surfaces.erase(key)
         _scrape_bank.erase(key)
+        _resonators.erase(key)
+
+
+## Lazily created only for bodies something has actually excited, keyed off
+## the same catalog identity as everything else - a hardened tool rings
+## differently than concrete because it is registered as different steel,
+## not because it has a second, private frequency table.
+func _resonator_for(target: Object) -> ModalResonator:
+    if target == null:
+        return null
+    var key := target.get_instance_id()
+    var existing: ModalResonator = _resonators.get(key)
+    if existing != null:
+        return existing
+    var data := FoundryMaterial.of(material_of(target))
+    var base_hz := float(data.get("ring_hz", 285.0))
+    var created := ModalResonatorScript.new()
+    created.configure(
+        [base_hz * 0.55, base_hz * 0.87, base_hz * 1.4],
+        [0.045, 0.05, 0.065]
+    )
+    _resonators[key] = created
+    return created
+
+
+## Public seam for transmitted vibration that should ring a body without
+## touching its surface history - a support hit shaking the deck it holds
+## up, not a direct contact on the deck's own face.
+func excite_resonance(target: Object, mass: float, energy: float) -> void:
+    _excite(target, mass, float(EnergyPartition.split(energy).acoustic))
+
+
+func _excite(target: Object, mass: float, acoustic_energy: float) -> void:
+    if target == null or acoustic_energy <= 0.0:
+        return
+    # Same E -> velocity relation used everywhere else in this game
+    # (EnergyPartition.kinetic_impulse), applied to a small effective modal
+    # mass rather than the whole body: only a fraction of a plate actually
+    # participates in any one vibration mode.
+    var modal_mass := maxf(mass * 0.02, 0.5)
+    var kick := sqrt(2.0 * acoustic_energy / modal_mass)
+    _resonator_for(target).excite(kick)
+
+
+func _step_resonators(delta: float) -> void:
+    for key in _resonators:
+        (_resonators[key] as ModalResonator).step(delta)
+
+
+## A component that fractures does not hand its shards the parent's ring.
+func kill_resonance(target: Object) -> void:
+    if target == null:
+        return
+    var res: ModalResonator = _resonators.get(target.get_instance_id())
+    if res != null:
+        res.kill()
+
+
+## Meters of normal-offset shimmer. The velocity-kick derivation in
+## _excite already yields a physically-scaled displacement in meters (a
+## moderate hit rings low-single-digit millimeters, a full collapse peaks
+## close to the clamp) - this only guards the shader uniform against an
+## unbounded value, it does not re-scale the physics.
+func resonance_shimmer(target: Object) -> float:
+    if target == null:
+        return 0.0
+    var res: ModalResonator = _resonators.get(target.get_instance_id())
+    if res == null:
+        return 0.0
+    return clampf(res.amplitude(), -0.012, 0.012)
 
 
 func _consequence(

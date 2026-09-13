@@ -17,6 +17,10 @@ var plane_mode := MODE_HORIZONTAL
 var base_color := Color(0.28, 0.29, 0.27)
 var material_id := FoundryMaterial.STRUCTURAL_STEEL
 var surface_state: SurfaceState
+## The body whose resonance drives shimmer. Not necessarily the same object
+## the surface_state is bound to (it usually is), kept separate so a skin
+## can shimmer with a body's ring without also inheriting its paint.
+var resonance_source: Object
 var _surface: MeshInstance3D
 var _cracks: MeshInstance3D
 var _surface_material: ShaderMaterial
@@ -84,16 +88,36 @@ func bind_surface_state(state: SurfaceState) -> void:
     _push_surface_uniforms()
 
 
+## Defaults to the surface_state's own body the first time it is bound, so
+## callers that only ever had one body to give (the common case) do not
+## need a second call.
+func bind_resonance_source(body: Object) -> void:
+    resonance_source = body
+
+
 func refresh(force: bool = false) -> void:
     if network == null or _surface == null:
         return
     _push_surface_uniforms()
+    _push_resonance_uniform()
     var revision: int = network.get_revision()
     if not force and revision == _seen_revision:
         return
     _seen_revision = revision
     _rebuild_surface()
     _rebuild_cracks()
+
+
+## Unconditional every call: a ringing plate's amplitude changes every
+## frame with no new damage/exposure event, so it cannot wait on the
+## surface_state revision guard the way paint/oxidation can.
+func _push_resonance_uniform() -> void:
+    if resonance_source == null or _surface_material == null:
+        return
+    _surface_material.set_shader_parameter(
+        "shimmer_m",
+        MaterialResponse.resonance_shimmer(resonance_source)
+    )
 
 
 func _push_surface_uniforms() -> void:

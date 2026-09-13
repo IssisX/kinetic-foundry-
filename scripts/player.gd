@@ -73,6 +73,21 @@ func receive_hazard_hit(damage: float, impulse: Vector3) -> void:
     receive_enemy_hit(damage * hazard_scale)
     velocity += impulse * (0.55 + hazard_scale * 0.45)
 
+## Oil or water underfoot is a real coupling nobody was reading: the
+## material substrate already tracked it (SurfaceState.traction_scale),
+## it just had no consumer.
+func _ground_traction() -> float:
+    if not is_on_floor():
+        return 1.0
+    var collision := get_last_slide_collision()
+    if collision == null:
+        return 1.0
+    var collider := collision.get_collider()
+    if collider == null:
+        return 1.0
+    return MaterialResponse.traction_at(collider)
+
+
 func begin_machine_climb(machine) -> bool:
     if machine == null or not is_instance_valid(machine):
         return false
@@ -172,6 +187,7 @@ func _physics_process(delta: float) -> void:
         target_speed = sprint_speed
     if attack_anim > 0.0:
         target_speed *= 0.42
+    target_speed *= _ground_traction()
 
     if traversal_lock <= 0.0:
         if desired.length_squared() > 0.001:
