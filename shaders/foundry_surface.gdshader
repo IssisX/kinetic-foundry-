@@ -38,8 +38,14 @@ varying vec4 v_solver;
 varying float v_crater;
 varying float v_wave;
 varying float v_ao;
+varying vec3 v_normal;
+varying vec3 v_tangent;
+varying vec3 v_binormal;
 
 void vertex() {
+	v_normal = normalize((MODEL_MATRIX * vec4(NORMAL, 0.0)).xyz);
+	v_tangent = normalize((MODEL_MATRIX * vec4(TANGENT, 0.0)).xyz);
+	v_binormal = normalize((MODEL_MATRIX * vec4(BINORMAL, 0.0)).xyz);
 	v_solver = COLOR;
 	v_wave = clamp(UV.y, 0.0, 1.0);
 	float d = clamp(COLOR.r, 0.0, 1.0) * damage_overlay;
@@ -61,6 +67,15 @@ void vertex() {
 	float height = mix(0.62, 1.0, smoothstep(0.02, 1.7, max(world_p.y, 0.0)));
 	float underside = mix(0.58, 1.0, clamp(world_n.y + 0.18, 0.0, 1.0));
 	v_ao = clamp(hemi * height * underside, 0.35, 1.0);
+}
+
+vec3 procedural_fracture_normal(vec3 world_pos, float damage, vec3 base_normal) {
+	float scale = 8.0;
+	vec3 frac_a = fract(sin(world_pos * scale) * 43758.5453) * 2.0 - 1.0;
+	vec3 frac_b = fract(sin(world_pos * scale * 0.7 + 11.0) * 43758.5453) * 2.0 - 1.0;
+	vec3 frac_detail = normalize(mix(frac_a, frac_b, 0.5)) * damage * damage;
+
+	return normalize(mix(base_normal, frac_detail, damage * 0.6));
 }
 
 void fragment() {
@@ -97,6 +112,8 @@ void fragment() {
 	float strain_glow = pow(heat, 4.0) * (0.35 + 0.65 * d) * stress_overlay;
 	float wave_glow = pow(wave, 1.6) * 0.85 * stress_overlay;
 	float load_glow = load_vis * load * 0.55;
+
+	NORMAL = procedural_fracture_normal(VERTEX, d, v_normal);
 
 	ALBEDO = albedo;
 	METALLIC = clamp(
