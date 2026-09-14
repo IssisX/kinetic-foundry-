@@ -226,24 +226,45 @@ func _enemy_control(delta: float) -> void:
         velocity.z = move_toward(velocity.z, 0.0, 18.0 * delta)
         return
     ai_time += delta
-    var target := get_tree().get_first_node_in_group("player")
-    if target == null:
+    var player := get_tree().get_first_node_in_group("player")
+    var to_player := Vector3.ZERO
+    var player_dist := 999.0
+    if player != null and is_instance_valid(player) and player.visible:
+        to_player = player.global_position - global_position
+        to_player.y = 0.0
+        player_dist = to_player.length()
+
+    # Work the station. Do not drive across the yard after the player.
+    if player_dist < 6.0:
+        var desired: float = atan2(-to_player.x, -to_player.z)
+        rotation.y = lerp_angle(rotation.y, desired, 0.04)
+        velocity.x = move_toward(velocity.x, 0.0, 10.0 * delta)
+        velocity.z = move_toward(velocity.z, 0.0, 10.0 * delta)
+        var hydro := maxf(get_hydraulic_ratio(), 0.24)
+        boom_angle = move_toward(boom_angle, -0.55, 0.8 * hydro * delta)
+        stick_angle = move_toward(stick_angle, 0.55, 0.8 * hydro * delta)
+        tool_angle = move_toward(tool_angle, -0.35, 0.8 * hydro * delta)
         return
-    var to_target: Vector3 = target.global_position - global_position
-    to_target.y = 0.0
-    if to_target.length() > 0.1:
-        var desired: float = atan2(-to_target.x, -to_target.z)
-        rotation.y = lerp_angle(rotation.y, desired, 0.018)
-    var forward: Vector3 = -global_basis.z
-    var throttle: float = 1.0 if to_target.length() > 7.0 else 0.0
-    var track_ratio := maxf(get_track_ratio(), 0.22)
-    velocity.x = forward.x * throttle * drive_speed * 0.48 * track_ratio
-    velocity.z = forward.z * throttle * drive_speed * 0.48 * track_ratio
-    var hydro := maxf(get_hydraulic_ratio(), 0.24)
-    arm_yaw = sin(ai_time * 0.74) * 0.46 * hydro
-    boom_angle = -0.35 + sin(ai_time * 0.88) * 0.18 * hydro
-    stick_angle = 0.30 + sin(ai_time * 1.14) * 0.22 * hydro
-    tool_angle = -0.15 + sin(ai_time * 1.31) * 0.22 * hydro
+
+    var home := work_anchor if work_anchor.length_squared() > 0.01 else global_position
+    var to_home: Vector3 = home - global_position
+    to_home.y = 0.0
+    if to_home.length() > 4.5:
+        var desired_home: float = atan2(-to_home.x, -to_home.z)
+        rotation.y = lerp_angle(rotation.y, desired_home, 0.02)
+        var forward_home := -global_basis.z
+        var track_ratio := maxf(get_track_ratio(), 0.22)
+        velocity.x = forward_home.x * 0.28 * drive_speed * track_ratio
+        velocity.z = forward_home.z * 0.28 * drive_speed * track_ratio
+    else:
+        rotation.y = lerp_angle(rotation.y, work_heading, 0.012)
+        velocity.x = move_toward(velocity.x, 0.0, 8.0 * delta)
+        velocity.z = move_toward(velocity.z, 0.0, 8.0 * delta)
+    var hydro_work := maxf(get_hydraulic_ratio(), 0.24)
+    arm_yaw = sin(ai_time * 0.22) * 0.38 * hydro_work
+    boom_angle = -0.22 + sin(ai_time * 0.18) * 0.10 * hydro_work
+    stick_angle = 0.34 + sin(ai_time * 0.20) * 0.12 * hydro_work
+    tool_angle = -0.08 + sin(ai_time * 0.16) * 0.10 * hydro_work
 
 func _apply_arm_pose() -> void:
     _boom.rotation = Vector3(boom_angle, arm_yaw, 0.0)
@@ -266,6 +287,16 @@ func _set_interpolated_arm_pose(target_boom: float, target_stick: float, target_
     _apply_arm_pose()
 
 func _resolve_arm_contact_pose() -> void:
+    var arm_moved := (
+        absf(boom_angle - _safe_boom_angle) > 0.003
+        or absf(stick_angle - _safe_stick_angle) > 0.003
+        or absf(tool_angle - _safe_tool_angle) > 0.003
+        or absf(arm_yaw - _safe_arm_yaw) > 0.003
+        or _tool_tip_speed > 0.40
+    )
+    if not arm_moved:
+        _apply_arm_pose()
+        return
     var target_boom := boom_angle
     var target_stick := stick_angle
     var target_tool := tool_angle
@@ -280,7 +311,7 @@ func _resolve_arm_contact_pose() -> void:
     var low := 0.0
     var high := 1.0
     var best := 0.0
-    for _i in 6:
+    for _i in 3:
         var mid := (low + high) * 0.5
         _set_interpolated_arm_pose(target_boom, target_stick, target_tool, target_yaw, mid)
         if _collect_hard_arm_contacts().is_empty():
@@ -295,7 +326,7 @@ func _collect_hard_arm_contacts() -> Array[Node]:
     var contacts: Array[Node] = []
     if get_world_3d() == null:
         return contacts
-    var exclude: Array[RID] = [get_rid()]
+    var exclude: Array[RID] = _arm_query_exclude()
     if held_load is CollisionObject3D:
         exclude.append(held_load.get_rid())
     for collision in _arm_shapes:
@@ -303,6 +334,25 @@ func _collect_hard_arm_contacts() -> Array[Node]:
     if held_load is CollisionObject3D:
         _append_body_contacts(held_load, ARM_CONTACT_MASK, exclude, contacts)
     return contacts
+
+
+func _arm_query_exclude() -> Array[RID]:
+    if _floor_exclude.is_empty():
+        _collect_floor_rids()
+    var exclude: Array[RID] = [get_rid()]
+    for rid in _floor_exclude:
+        exclude.append(rid)
+    return exclude
+
+
+func _is_work_surface(collider: Node) -> bool:
+    if collider == null:
+        return true
+    if collider.is_in_group("yard_substrate"):
+        return true
+    if collider.name == "Ground":
+        return true
+    return false
 
 
 func _append_body_contacts(
@@ -337,10 +387,12 @@ func _append_shape_contacts(
     query.collide_with_bodies = true
     query.collide_with_areas = false
     query.exclude = exclude
-    var hits := get_world_3d().direct_space_state.intersect_shape(query, 24)
+    var hits := get_world_3d().direct_space_state.intersect_shape(query, 8)
     for hit in hits:
         var collider = hit.get("collider")
         if not is_hard_world_contact(collider):
+            continue
+        if _is_work_surface(collider):
             continue
         if not contacts.has(collider):
             contacts.append(collider)

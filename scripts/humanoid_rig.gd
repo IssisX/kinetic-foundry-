@@ -3,6 +3,8 @@ extends Node3D
 const GeomUtil = preload("res://scripts/geom.gd")
 
 var player_style := false
+var look_id := 0
+var role := 0
 var phase := 0.0
 var attack_side := 1.0
 var attack_mode := 0
@@ -29,35 +31,112 @@ var foot_r: Node3D
 var toe_l: Node3D
 var toe_r: Node3D
 
-func configure(is_player: bool) -> void:
+var _brow_l: Node3D
+var _brow_r: Node3D
+var _jaw: Node3D
+var _mouth: Node3D
+var _lid_l: Node3D
+var _lid_r: Node3D
+var _look_data: Dictionary = {}
+
+
+func configure(is_player: bool, id: int = 0, crew_role: int = 0) -> void:
     player_style = is_player
+    look_id = id
+    role = crew_role
     _build()
 
+
+func _look() -> Dictionary:
+    var rng := RandomNumberGenerator.new()
+    rng.seed = int(absi(hash("%s-%s-%s" % [look_id, role, 1 if player_style else 2])))
+    var skins := [
+        Color(0.86, 0.68, 0.54),
+        Color(0.76, 0.56, 0.42),
+        Color(0.64, 0.44, 0.32),
+        Color(0.50, 0.34, 0.24),
+        Color(0.38, 0.24, 0.16),
+        Color(0.90, 0.74, 0.60)
+    ]
+    var eyes := [
+        Color(0.14, 0.22, 0.20),
+        Color(0.32, 0.18, 0.08),
+        Color(0.16, 0.32, 0.42),
+        Color(0.24, 0.20, 0.12),
+        Color(0.28, 0.38, 0.18),
+        Color(0.40, 0.36, 0.30)
+    ]
+    var hairs := [
+        Color(0.07, 0.05, 0.04),
+        Color(0.22, 0.12, 0.06),
+        Color(0.38, 0.24, 0.10),
+        Color(0.12, 0.12, 0.13),
+        Color(0.46, 0.42, 0.34),
+        Color(0.18, 0.08, 0.05)
+    ]
+    if player_style:
+        return {
+            "cloth": Color(0.16, 0.18, 0.17),
+            "cloth_dark": Color(0.09, 0.10, 0.09),
+            "skin": Color(0.78, 0.58, 0.44),
+            "gear": Color(0.11, 0.12, 0.11),
+            "boot": Color(0.07, 0.07, 0.07),
+            "eye": Color(0.16, 0.32, 0.34),
+            "hair": Color(0.08, 0.06, 0.05),
+            "hat": Color(0.14, 0.15, 0.14),
+            "wear_hat": false,
+            "beard": false,
+            "mustache": false,
+            "scowl": false,
+            "mouth_w": 0.068,
+            "brow_drop": 0.0,
+            "hair_long": true,
+            "head_s": 1.02
+        }
+    var runner := role == 2
+    var heavy := role == 1
+    var rigger := role == 3
+    var plate := role == 4
+    return {
+        "cloth": Color(0.23, 0.25, 0.22).lerp(Color(0.16, 0.18, 0.24), rng.randf() * 0.55),
+        "cloth_dark": Color(0.12, 0.13, 0.12),
+        "skin": skins[rng.randi() % skins.size()],
+        "gear": Color(0.12, 0.13, 0.12),
+        "boot": Color(0.07, 0.07, 0.07),
+        "eye": eyes[rng.randi() % eyes.size()],
+        "hair": hairs[rng.randi() % hairs.size()],
+        "hat": Color(0.82, 0.62, 0.12) if rigger else Color(0.76, 0.54, 0.10),
+        "wear_hat": (not runner) and (rigger or rng.randf() > 0.45),
+        "beard": heavy or rng.randf() > 0.58,
+        "mustache": (not heavy) and rng.randf() > 0.62,
+        "scowl": heavy or plate,
+        "mouth_w": 0.048 + rng.randf() * 0.034,
+        "brow_drop": (0.016 if heavy else 0.0) + rng.randf() * 0.010,
+        "hair_long": rng.randf() > 0.48,
+        "head_s": 0.94 + rng.randf() * 0.12
+    }
+
+
 func _build() -> void:
-    var cloth := Color(0.18, 0.20, 0.19) if player_style else Color(0.24, 0.26, 0.23)
-    var cloth_dark := Color(0.10, 0.11, 0.105)
-    var skin := Color(0.76, 0.56, 0.44) if player_style else Color(0.66, 0.50, 0.38)
-    var gear := Color(0.12, 0.13, 0.125)
-    var boot := Color(0.07, 0.075, 0.07)
-    var hat := Color(0.16, 0.17, 0.165) if player_style else Color(0.78, 0.58, 0.12)
+    _look_data = _look()
+    var look: Dictionary = _look_data
+    var cloth: Color = look.get("cloth")
+    var cloth_dark: Color = look.get("cloth_dark")
+    var skin: Color = look.get("skin")
+    var gear: Color = look.get("gear")
+    var boot: Color = look.get("boot")
 
     pelvis = Node3D.new()
     pelvis.name = "Pelvis"
     pelvis.position = Vector3(0.0, 0.94, 0.0)
     add_child(pelvis)
 
-    var hip_mass := GeomUtil.capsule_mesh(0.18, 0.26, cloth_dark)
-    hip_mass.scale = Vector3(1.48, 1.0, 0.88)
-    hip_mass.position.y = -0.02
-    pelvis.add_child(hip_mass)
-    var belt := GeomUtil.cylinder_mesh(0.21, 0.06, gear, 0.88, 0.12)
-    belt.scale = Vector3(1.38, 1.0, 0.92)
-    belt.position.y = 0.10
+    var hips := GeomUtil.box_mesh(Vector3(0.36, 0.22, 0.20), cloth_dark, 0.90, 0.04)
+    hips.position.y = 0.00
+    pelvis.add_child(hips)
+    var belt := GeomUtil.box_mesh(Vector3(0.38, 0.05, 0.22), gear, 0.90, 0.10)
+    belt.position.y = 0.12
     pelvis.add_child(belt)
-    for side in [-1.0, 1.0]:
-        var pouch := GeomUtil.box_mesh(Vector3(0.07, 0.09, 0.05), gear, 0.90, 0.08)
-        pouch.position = Vector3(side * 0.20, 0.01, 0.02)
-        pelvis.add_child(pouch)
 
     spine = Node3D.new()
     spine.name = "Spine"
@@ -69,41 +148,40 @@ func _build() -> void:
     torso.position = Vector3(0.0, 0.12, 0.0)
     spine.add_child(torso)
 
-    var rib := GeomUtil.capsule_mesh(0.20, 0.60, cloth)
-    rib.scale = Vector3(1.38 if player_style else 1.24, 1.0, 0.72)
-    rib.position = Vector3(0.0, 0.28, 0.01)
-    torso.add_child(rib)
-
-    var placket := GeomUtil.box_mesh(
-        Vector3(0.055, 0.34, 0.028),
-        cloth_dark,
-        0.88,
-        0.04
+    var chest := GeomUtil.box_mesh(
+        Vector3(0.40 if player_style else 0.36, 0.36, 0.20),
+        cloth,
+        0.86,
+        0.03
     )
-    placket.position = Vector3(0.0, 0.30, -0.148)
-    torso.add_child(placket)
+    chest.position = Vector3(0.0, 0.40, 0.01)
+    torso.add_child(chest)
+    var gut := GeomUtil.box_mesh(
+        Vector3(0.36 if player_style else 0.33, 0.24, 0.18),
+        cloth,
+        0.88,
+        0.03
+    )
+    gut.position = Vector3(0.0, 0.14, 0.01)
+    torso.add_child(gut)
 
-    var collar := GeomUtil.cylinder_mesh(0.10, 0.045, cloth, 0.82, 0.0)
-    collar.position = Vector3(0.0, 0.62, 0.0)
-    torso.add_child(collar)
-
-    var shoulders := GeomUtil.capsule_mesh(0.095, 0.68 if player_style else 0.60, cloth)
-    shoulders.rotation.z = PI * 0.5
-    shoulders.position = Vector3(0.0, 0.58, 0.01)
-    torso.add_child(shoulders)
+    for side in [-1.0, 1.0]:
+        var pad := GeomUtil.box_mesh(Vector3(0.13, 0.10, 0.16), cloth, 0.86, 0.04)
+        pad.position = Vector3(side * 0.26, 0.56, 0.01)
+        torso.add_child(pad)
 
     head_root = Node3D.new()
     head_root.name = "Head"
-    head_root.position = Vector3(0.0, 0.72, 0.02)
+    head_root.position = Vector3(0.0, 0.70, 0.02)
     torso.add_child(head_root)
-    _build_head(head_root, skin, hat, gear)
+    _build_head(head_root, look)
 
     arm_l = _build_arm(torso, -1.0, cloth, gear, skin)
     arm_r = _build_arm(torso, 1.0, cloth, gear, skin)
     elbow_l = arm_l.get_node("Elbow")
     elbow_r = arm_r.get_node("Elbow")
-    leg_l = _build_leg(pelvis, -1.0, cloth_dark, gear, boot)
-    leg_r = _build_leg(pelvis, 1.0, cloth_dark, gear, boot)
+    leg_l = _build_leg(pelvis, -1.0, cloth_dark, boot)
+    leg_r = _build_leg(pelvis, 1.0, cloth_dark, boot)
     knee_l = leg_l.get_node("Knee")
     knee_r = leg_r.get_node("Knee")
     foot_l = knee_l.get_node("Foot")
@@ -112,176 +190,211 @@ func _build() -> void:
     toe_r = foot_r.get_node("Toe")
 
 
-func _build_head(root: Node3D, skin: Color, hat: Color, gear: Color) -> void:
-    var neck := GeomUtil.cylinder_mesh(0.065, 0.16, skin, 0.78, 0.0)
-    neck.position.y = 0.05
+func _build_head(root: Node3D, look: Dictionary) -> void:
+    var skin: Color = look.get("skin")
+    var hair: Color = look.get("hair")
+    var eye: Color = look.get("eye")
+    var scowl: bool = bool(look.get("scowl", false))
+    var brow_drop: float = float(look.get("brow_drop", 0.0))
+    var head_s: float = float(look.get("head_s", 1.0))
+    var mouth_w: float = float(look.get("mouth_w", 0.06))
+
+    var neck := GeomUtil.box_mesh(Vector3(0.11, 0.14, 0.11), skin, 0.78, 0.0)
+    neck.position.y = 0.06
     root.add_child(neck)
 
-    var skull := GeomUtil.sphere_mesh(0.152 if player_style else 0.145, skin)
-    skull.scale = Vector3(0.90, 1.10, 0.94)
-    skull.position = Vector3(0.0, 0.22, 0.02)
+    # Flattened in Z so the face is a plane we can put features on,
+    # not a sphere the camera reads as a helmet.
+    var skull := GeomUtil.sphere_mesh(0.150 * head_s, skin)
+    skull.scale = Vector3(0.90, 1.08, 0.78)
+    skull.position = Vector3(0.0, 0.22, 0.04)
     root.add_child(skull)
 
-    var jaw := GeomUtil.sphere_mesh(0.098, skin)
-    jaw.scale = Vector3(0.88, 0.68, 0.80)
-    jaw.position = Vector3(0.0, 0.115, -0.015)
-    root.add_child(jaw)
+    _jaw = GeomUtil.sphere_mesh(0.096, skin)
+    _jaw.scale = Vector3(0.88, 0.58, 0.72)
+    _jaw.position = Vector3(0.0, 0.108, 0.00)
+    root.add_child(_jaw)
 
-    var chin := GeomUtil.sphere_mesh(0.042, skin)
-    chin.scale = Vector3(0.85, 0.70, 0.90)
-    chin.position = Vector3(0.0, 0.072, -0.095)
+    var chin := GeomUtil.sphere_mesh(0.040, skin)
+    chin.scale = Vector3(0.86, 0.58, 0.90)
+    chin.position = Vector3(0.0, 0.062, -0.118)
     root.add_child(chin)
 
-    var brow := GeomUtil.box_mesh(Vector3(0.18, 0.028, 0.045), skin, 0.70, 0.0)
-    brow.position = Vector3(0.0, 0.242, -0.118)
-    root.add_child(brow)
-
-    var nose := GeomUtil.capsule_mesh(0.018, 0.062, skin)
-    nose.rotation.x = 0.62
-    nose.position = Vector3(0.0, 0.178, -0.152)
+    var nose := GeomUtil.box_mesh(Vector3(0.032, 0.062, 0.058), skin, 0.62, 0.0)
+    nose.position = Vector3(0.0, 0.178, -0.162)
     root.add_child(nose)
 
-    var mouth := GeomUtil.box_mesh(Vector3(0.068, 0.011, 0.016), Color(0.46, 0.24, 0.22), 0.55, 0.0)
-    mouth.position = Vector3(0.0, 0.112, -0.142)
-    root.add_child(mouth)
+    _mouth = GeomUtil.box_mesh(
+        Vector3(mouth_w, 0.016, 0.022),
+        Color(0.42, 0.16, 0.16) if scowl else Color(0.50, 0.24, 0.24),
+        0.50,
+        0.0
+    )
+    _mouth.position = Vector3(0.0, 0.100 if scowl else 0.108, -0.150)
+    root.add_child(_mouth)
 
     for side in [-1.0, 1.0]:
         var ear := GeomUtil.sphere_mesh(0.036, skin)
-        ear.scale = Vector3(0.40, 1.08, 0.70)
-        ear.position = Vector3(side * 0.138, 0.200, 0.018)
+        ear.scale = Vector3(0.36, 1.16, 0.70)
+        ear.position = Vector3(side * 0.138, 0.198, 0.028)
         root.add_child(ear)
 
-        var cheek := GeomUtil.sphere_mesh(0.048, skin)
-        cheek.scale = Vector3(0.78, 0.72, 0.62)
-        cheek.position = Vector3(side * 0.092, 0.148, -0.072)
+        var cheek := GeomUtil.sphere_mesh(0.046, skin)
+        cheek.scale = Vector3(0.70, 0.64, 0.52)
+        cheek.position = Vector3(side * 0.090, 0.142, -0.078)
         root.add_child(cheek)
 
-        var brow_hair := GeomUtil.box_mesh(
-            Vector3(0.055, 0.012, 0.018),
-            Color(0.14, 0.11, 0.09) if player_style else Color(0.22, 0.15, 0.10),
+        var brow := GeomUtil.box_mesh(
+            Vector3(0.064, 0.018, 0.024),
+            hair,
             0.92,
             0.0
         )
-        brow_hair.position = Vector3(side * 0.048, 0.232, -0.128)
-        root.add_child(brow_hair)
-
-        var sclera := GeomUtil.sphere_mesh(0.026, Color(0.94, 0.94, 0.91))
-        sclera.position = Vector3(side * 0.046, 0.198, -0.138)
-        root.add_child(sclera)
-        var iris := GeomUtil.sphere_mesh(
-            0.015,
-            Color(0.16, 0.22, 0.20) if player_style else Color(0.24, 0.16, 0.10)
+        brow.position = Vector3(
+            side * 0.048,
+            0.236 - brow_drop,
+            -0.138
         )
-        iris.position = Vector3(side * 0.046, 0.196, -0.152)
+        brow.rotation.z = side * (0.22 if scowl else 0.08)
+        root.add_child(brow)
+        if side < 0.0:
+            _brow_l = brow
+        else:
+            _brow_r = brow
+
+        var lid := GeomUtil.box_mesh(Vector3(0.056, 0.010, 0.014), skin, 0.66, 0.0)
+        lid.position = Vector3(side * 0.048, 0.214, -0.148)
+        root.add_child(lid)
+        if side < 0.0:
+            _lid_l = lid
+        else:
+            _lid_r = lid
+
+        # Eyes sit on the face plane, proud of the skull so a close camera
+        # actually sees them instead of a blank tan sphere.
+        var sclera := GeomUtil.sphere_mesh(0.030, Color(0.96, 0.96, 0.94))
+        sclera.position = Vector3(side * 0.048, 0.196, -0.152)
+        root.add_child(sclera)
+        var iris := GeomUtil.sphere_mesh(0.018, eye)
+        iris.position = Vector3(side * 0.048, 0.194, -0.168)
         root.add_child(iris)
-        var pupil := GeomUtil.sphere_mesh(0.007, Color(0.04, 0.04, 0.04))
-        pupil.position = Vector3(side * 0.046, 0.196, -0.160)
+        var pupil := GeomUtil.sphere_mesh(0.008, Color(0.03, 0.03, 0.03))
+        pupil.position = Vector3(side * 0.048, 0.194, -0.176)
         root.add_child(pupil)
 
-    var scalp := GeomUtil.sphere_mesh(0.155, Color(0.12, 0.10, 0.09) if player_style else Color(0.20, 0.14, 0.10))
-    scalp.scale = Vector3(0.88, 0.38, 0.90)
-    scalp.position = Vector3(0.0, 0.318, 0.02)
+    var scalp := GeomUtil.sphere_mesh(0.154 * head_s, hair)
+    scalp.scale = Vector3(0.92, 0.40, 0.86)
+    scalp.position = Vector3(0.0, 0.318, 0.04)
     root.add_child(scalp)
 
-    # Hard-hat sits on the crown. A ring brim, not a visor over the face.
-    var dome := GeomUtil.sphere_mesh(0.168, hat)
-    dome.scale = Vector3(1.00, 0.40, 0.98)
-    dome.position = Vector3(0.0, 0.355, 0.02)
-    root.add_child(dome)
-    var brim := GeomUtil.cylinder_mesh(0.188, 0.016, hat, 0.72, 0.08)
-    brim.scale = Vector3(1.08, 1.0, 1.04)
-    brim.position = Vector3(0.0, 0.292, 0.02)
-    root.add_child(brim)
-    var band := GeomUtil.cylinder_mesh(0.160, 0.032, gear, 0.84, 0.10)
-    band.position = Vector3(0.0, 0.302, 0.02)
-    root.add_child(band)
+    if bool(look.get("hair_long", false)):
+        for side in [-1.0, 1.0]:
+            var lock := GeomUtil.sphere_mesh(0.048, hair)
+            lock.scale = Vector3(0.55, 1.35, 0.70)
+            lock.position = Vector3(side * 0.118, 0.168, 0.018)
+            root.add_child(lock)
+
+    if bool(look.get("beard", false)):
+        var beard := GeomUtil.sphere_mesh(0.082, hair)
+        beard.scale = Vector3(0.90, 0.72, 0.70)
+        beard.position = Vector3(0.0, 0.070, -0.055)
+        root.add_child(beard)
+    if bool(look.get("mustache", false)):
+        var stash := GeomUtil.box_mesh(Vector3(0.074, 0.012, 0.018), hair, 0.90, 0.0)
+        stash.position = Vector3(0.0, 0.122, -0.150)
+        root.add_child(stash)
+
+    # Crown only. A brim cylinder reads as a facemask from any camera.
+    if bool(look.get("wear_hat", false)):
+        var dome := GeomUtil.sphere_mesh(0.160 * head_s, look.get("hat"))
+        dome.scale = Vector3(0.96, 0.34, 0.90)
+        dome.position = Vector3(0.0, 0.378, 0.04)
+        root.add_child(dome)
 
 
 func _build_arm(parent: Node3D, side: float, cloth: Color, gear: Color, skin: Color) -> Node3D:
     var shoulder := Node3D.new()
     shoulder.name = "ArmL" if side < 0.0 else "ArmR"
-    shoulder.position = Vector3(side * 0.36, 0.56, 0.0)
+    shoulder.position = Vector3(side * 0.34, 0.54, 0.0)
     parent.add_child(shoulder)
 
-    var deltoid := GeomUtil.sphere_mesh(0.115 if player_style else 0.105, cloth)
-    deltoid.scale = Vector3(1.05, 1.12, 0.95)
+    var deltoid := GeomUtil.box_mesh(Vector3(0.14, 0.14, 0.14), cloth, 0.86, 0.04)
     shoulder.add_child(deltoid)
 
-    var upper := GeomUtil.capsule_mesh(0.072, 0.42, cloth)
-    upper.position.y = -0.20
+    var upper := GeomUtil.capsule_mesh(0.055, 0.46, cloth)
+    upper.position.y = -0.22
     shoulder.add_child(upper)
 
     var elbow := Node3D.new()
     elbow.name = "Elbow"
-    elbow.position.y = -0.42
+    elbow.position.y = -0.44
     shoulder.add_child(elbow)
 
-    var joint := GeomUtil.sphere_mesh(0.064, cloth)
+    var joint := GeomUtil.sphere_mesh(0.052, cloth)
     elbow.add_child(joint)
 
-    var forearm := GeomUtil.capsule_mesh(0.058, 0.38, cloth)
+    var forearm := GeomUtil.capsule_mesh(0.046, 0.40, cloth)
     forearm.position.y = -0.18
     elbow.add_child(forearm)
 
-    var cuff := GeomUtil.cylinder_mesh(0.054, 0.045, gear, 0.88, 0.08)
-    cuff.position.y = -0.34
+    var cuff := GeomUtil.box_mesh(Vector3(0.09, 0.04, 0.09), gear, 0.88, 0.08)
+    cuff.position.y = -0.36
     elbow.add_child(cuff)
 
-    var palm := GeomUtil.box_mesh(Vector3(0.065, 0.095, 0.036), skin, 0.72, 0.0)
-    palm.position = Vector3(0.0, -0.42, -0.01)
+    var palm := GeomUtil.box_mesh(Vector3(0.062, 0.090, 0.034), skin, 0.72, 0.0)
+    palm.position = Vector3(0.0, -0.44, -0.01)
     elbow.add_child(palm)
     for finger_i in 3:
-        var finger := GeomUtil.capsule_mesh(0.011, 0.052, skin)
-        finger.position = Vector3(-0.020 + float(finger_i) * 0.020, -0.49, -0.01)
+        var finger := GeomUtil.capsule_mesh(0.010, 0.050, skin)
+        finger.position = Vector3(-0.018 + float(finger_i) * 0.018, -0.51, -0.01)
         elbow.add_child(finger)
-    var thumb := GeomUtil.capsule_mesh(0.012, 0.042, skin)
+    var thumb := GeomUtil.capsule_mesh(0.011, 0.040, skin)
     thumb.rotation.z = side * 0.7
-    thumb.position = Vector3(side * 0.036, -0.43, 0.01)
+    thumb.position = Vector3(side * 0.034, -0.45, 0.01)
     elbow.add_child(thumb)
     return shoulder
 
 
-func _build_leg(parent: Node3D, side: float, cloth: Color, gear: Color, boot: Color) -> Node3D:
+func _build_leg(parent: Node3D, side: float, cloth: Color, boot: Color) -> Node3D:
     var hip := Node3D.new()
     hip.name = "LegL" if side < 0.0 else "LegR"
-    hip.position = Vector3(side * 0.12, -0.08, 0.0)
+    hip.position = Vector3(side * 0.13, -0.08, 0.0)
     parent.add_child(hip)
 
-    var thigh := GeomUtil.capsule_mesh(0.100, 0.42, cloth)
-    thigh.position.y = -0.20
-    thigh.scale = Vector3(1.08, 1.0, 0.95)
+    var thigh := GeomUtil.capsule_mesh(0.078, 0.50, cloth)
+    thigh.position.y = -0.22
     hip.add_child(thigh)
 
     var knee := Node3D.new()
     knee.name = "Knee"
-    knee.position.y = -0.42
+    knee.position.y = -0.44
     hip.add_child(knee)
 
-    var knee_joint := GeomUtil.sphere_mesh(0.085, cloth)
+    var knee_joint := GeomUtil.sphere_mesh(0.062, cloth)
     knee.add_child(knee_joint)
 
-    var shin := GeomUtil.capsule_mesh(0.072, 0.40, cloth)
-    shin.position.y = -0.20
+    var shin := GeomUtil.capsule_mesh(0.058, 0.48, cloth)
+    shin.position.y = -0.22
     knee.add_child(shin)
 
     var foot := Node3D.new()
     foot.name = "Foot"
-    foot.position.y = -0.42
+    foot.position.y = -0.44
     knee.add_child(foot)
 
-    var ankle := GeomUtil.sphere_mesh(0.052, boot)
+    var ankle := GeomUtil.sphere_mesh(0.048, boot)
     ankle.position.y = 0.04
     foot.add_child(ankle)
-    var sole := GeomUtil.box_mesh(Vector3(0.095, 0.065, 0.25), boot, 0.92, 0.0)
-    sole.position = Vector3(0.0, -0.02, -0.06)
+    var sole := GeomUtil.box_mesh(Vector3(0.090, 0.060, 0.24), boot, 0.92, 0.0)
+    sole.position = Vector3(0.0, -0.02, -0.05)
     foot.add_child(sole)
 
     var toe := Node3D.new()
     toe.name = "Toe"
-    toe.position = Vector3(0.0, -0.02, -0.20)
+    toe.position = Vector3(0.0, -0.02, -0.18)
     foot.add_child(toe)
-    var cap := GeomUtil.sphere_mesh(0.046, boot)
-    cap.scale = Vector3(1.15, 0.62, 1.20)
+    var cap := GeomUtil.box_mesh(Vector3(0.088, 0.045, 0.08), boot, 0.90, 0.0)
+    cap.position.z = 0.0
     toe.add_child(cap)
     return hip
 
@@ -336,6 +449,7 @@ func animate(delta: float, planar_speed: float, reference_speed: float, attack_a
         torso.rotation.z += attack_side * hit_amount * 0.16
         head_root.rotation.x = hit_amount * 0.22
 
+    _express()
     _apply_crush(delta)
     death_blend = move_toward(death_blend, 1.0 if dead else 0.0, delta * (2.8 if dead else 5.0))
     if death_blend > 0.0:
@@ -348,6 +462,21 @@ func animate(delta: float, planar_speed: float, reference_speed: float, attack_a
         rotation.z = 0.0
         rotation.x = 0.0
         position.y = 0.0
+
+
+func _express() -> void:
+    if _brow_l == null or _lid_l == null:
+        return
+    var t := phase * 0.35 + float(look_id % 17) * 0.41
+    var blink := 1.0 if fmod(t, 5.4) < 0.16 else 0.0
+    _lid_l.position.y = 0.214 - blink * 0.018
+    _lid_r.position.y = 0.214 - blink * 0.018
+    _lid_l.scale.y = 1.0 + blink * 2.4
+    _lid_r.scale.y = 1.0 + blink * 2.4
+    if _jaw != null:
+        _jaw.position.y = 0.108 + sin(t * 0.7) * 0.004
+    if _mouth != null:
+        _mouth.scale.x = 1.0 + sin(t * 0.9) * 0.04
 
 
 func _apply_crush(delta: float) -> void:
@@ -415,6 +544,7 @@ func pose_climb(t: float, side: float) -> void:
     knee_l.rotation.x = 1.02
     knee_r.rotation.x = 0.78
     head_root.rotation = Vector3(-0.08, -side * 0.18, 0.0)
+    _express()
 
 func set_attack_side(side: float) -> void:
     attack_side = 1.0 if side >= 0.0 else -1.0

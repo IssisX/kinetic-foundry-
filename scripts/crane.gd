@@ -300,6 +300,10 @@ func _enemy_control(delta: float) -> void:
         ROPE_MIN,
         ROPE_MAX
     )
+    if distance > 14.0:
+        velocity.x = move_toward(velocity.x, 0.0, 9.0 * delta)
+        velocity.z = move_toward(velocity.z, 0.0, 9.0 * delta)
+        return
     if distance > 9.0:
         var forward := -global_basis.z
         velocity.x = forward.x * drive_speed * 0.7

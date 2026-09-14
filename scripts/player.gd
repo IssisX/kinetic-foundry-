@@ -54,7 +54,7 @@ func _ready() -> void:
     collision.position.y = 0.91
     _rig = HumanoidRigScript.new()
     add_child(_rig)
-    _rig.configure(true)
+    _rig.configure(true, 1, 0)
 
 func configure(controls, camera) -> void:
     hud = controls

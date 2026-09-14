@@ -93,49 +93,61 @@ func _freeze_gameplay() -> void:
 func _stage_yard_overview() -> void:
     _show_all_enemies(true)
     game.player.visible = true
-    game.player.global_position = Vector3(-6.0, 0.03, 10.0)
-    game.excavator.global_position = Vector3(3.5, -0.17, 1.0)
-    game.excavator.rotation.y = 0.34
+    game.player.global_position = Vector3(-10.0, 0.03, 13.0)
+    game.player.rotation.y = 0.4
+    game.excavator.global_position = Vector3(4.0, -0.17, -3.0)
+    game.excavator.rotation.y = 0.42
+    game.excavator.boom_angle = -0.28
+    game.excavator.stick_angle = 0.40
+    game.excavator.tool_angle = -0.12
+    game.excavator.arm_yaw = 0.22
+    game.excavator._apply_arm_pose()
     if game.dozer != null:
         game.dozer.visible = true
-        game.dozer.global_position = Vector3(11.6, -0.12, 7.4)
-        game.dozer.rotation.y = -0.72
-        game.dozer.blade_lift = 0.10
-        game.dozer.blade_tilt = 0.06
+        game.dozer.global_position = Vector3(15.5, -0.12, 8.5)
+        game.dozer.rotation.y = 0.18
+        game.dozer.blade_lift = 0.08
+        game.dozer.blade_tilt = 0.04
         game.dozer._apply_pose()
     if game.crane != null:
         game.crane.visible = true
+        game.crane.global_position = Vector3(-6.5, -0.10, -12.0)
     game.mission.stage = 0
     _clear_machine_hud()
     game.hud.set_health(0.92)
     game.hud.set_target(null)
-    game.hud.set_objective("BREAK THE YARD CREW", "CUT THROUGH THE ACTIVE FOUNDRY AND EXPOSE THE MACHINE")
+    game.hud.set_objective("CREW HOLDS THE YARD", "MACHINES WORK THEIR STATION // PEOPLE HOLD THEIR POST")
     game.hud.set_objective_progress(0.20)
-    game.hud.set_context("POWER // COMBAT // MACHINES")
+    game.hud.set_context("NO LOST-DOG MACHINES // POSTS NOT SHADOWS")
     _camera(Vector3(30.0, 20.0, 30.0), Vector3(0.0, 3.4, -4.0), 60.0)
 
 func _stage_combat() -> void:
     game.player.visible = true
-    game.player.global_position = Vector3(0.0, 0.03, 10.5)
-    game.player.rotation.y = PI
-    game.player.attack_anim = 0.22
+    game.player.global_position = Vector3(0.0, 0.03, 11.2)
+    game.player.rotation.y = 0.0
+    game.player.attack_anim = 0.0
     game.player.attack_duration = 0.38
-    game.player.attack_mode = 1
+    game.player.attack_mode = 0
     game.player.attack_side = 1.0
     if game.player._rig != null:
         game.player._rig.set_attack_side(1.0)
-        game.player._rig.set_attack_mode(1)
+        game.player._rig.set_attack_mode(0)
         game.player._animate(0.016)
 
     var visible_enemies := _visible_enemies()
-    var positions := [Vector3(-2.1, 0.03, 8.4), Vector3(2.2, 0.03, 8.2), Vector3(-3.5, 0.03, 11.3), Vector3(3.7, 0.03, 11.7)]
+    var positions := [
+        Vector3(-1.05, 0.03, 10.55),
+        Vector3(1.12, 0.03, 10.45),
+        Vector3(-1.85, 0.03, 11.45),
+        Vector3(1.95, 0.03, 11.35)
+    ]
     for i in mini(visible_enemies.size(), positions.size()):
         var enemy = visible_enemies[i]
         enemy.visible = true
         enemy.global_position = positions[i]
-        enemy.look_at(game.player.global_position, Vector3.UP)
-        enemy.attack_windup = 0.18 if i == 0 else 0.0
-        enemy.hit_anim = 0.11 if i == 1 else 0.0
+        enemy.rotation.y = 0.0
+        enemy.attack_windup = 0.0
+        enemy.hit_anim = 0.0
         enemy._animate(0.016)
     for i in range(positions.size(), visible_enemies.size()):
         visible_enemies[i].visible = false
@@ -144,10 +156,10 @@ func _stage_combat() -> void:
     _clear_machine_hud()
     game.hud.set_health(0.76)
     game.hud.set_target(game.player.engaged_target)
-    game.hud.set_objective("BREAK THE YARD CREW", "TACKLE // COMBO // KICK // GRAB // THROW")
+    game.hud.set_objective("FACES, NOT DISCS", "EACH CREW MEMBER IS A DIFFERENT PERSON")
     game.hud.set_objective_progress(0.45)
-    game.hud.set_context("HIPS COUNTER THE SWING // SIDE KICK")
-    _camera(Vector3(5.6, 1.85, 9.55), Vector3(0.0, 1.22, 9.6), 48.0)
+    game.hud.set_context("NO BRIM // NO HUBCAPS // EYES FORWARD")
+    _camera(Vector3(0.28, 1.52, 8.55), Vector3(0.04, 1.38, 11.05), 34.0)
 
 func _stage_excavator_operator_pov() -> void:
     game.player.visible = false
@@ -322,16 +334,16 @@ func _stage_gait_observables() -> bool:
     game.hud.set_health(1.0)
     game.hud.set_objective(
         "WALK THE YARD",
-        "HIPS COUNTER THE SWING // FACE FORWARD"
+        "FACE FORWARD // A WORKING RIGHT LEG"
     )
     game.hud.set_objective_progress(0.72)
     game.hud.set_context(
-        "PLANTED CONTACTS // COM TRANSFER"
+        "NO FACEMASK // NO KNOCK-KNEES"
     )
     _camera(
-        focus + Vector3(1.55, 1.58, -2.85),
-        focus + Vector3(0.05, 1.48, -0.08),
-        36.0
+        focus + Vector3(0.18, 1.54, -2.05),
+        focus + Vector3(0.02, 1.42, 0.08),
+        30.0
     )
     await _settle_frames(8)
     _capture("07_walk_single_support.png")
@@ -349,11 +361,11 @@ func _stage_gait_observables() -> bool:
     )
     game.hud.set_objective_progress(0.86)
     game.hud.set_context(
-        "NO FLIGHT PHASE // SUPPORT BRIDGE"
+        "STANCE WIDTH MATCHES THE HIPS"
     )
     _camera(
-        focus + Vector3(-1.85, 1.52, -2.55),
-        focus + Vector3(-0.05, 1.42, -0.05),
+        focus + Vector3(1.95, 1.08, -1.70),
+        focus + Vector3(0.0, 0.78, 0.06),
         38.0
     )
     await _settle_frames(8)

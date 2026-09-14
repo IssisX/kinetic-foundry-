@@ -63,6 +63,9 @@ var _throw_cooldown := 0.0
 var _salvage_cooldown := 0.0
 var _corpse_flight_time := 0.0
 var _corpse_flight_source: Node
+var post := Vector3.ZERO
+var aggro := 0.0
+var _post_locked := false
 
 
 static func archetype_stats(id: int) -> Dictionary:
@@ -157,13 +160,37 @@ func _ready() -> void:
     _apply_archetype()
     _rig = HumanoidRigScript.new()
     add_child(_rig)
-    _rig.configure(false)
+    _rig.configure(false, int(get_instance_id()), archetype)
     _rig.set_attack_side(flank_sign)
 
     _carry_anchor = Node3D.new()
     _carry_anchor.name = "CarryAnchor"
     _carry_anchor.position = Vector3(0.0, 1.05, -0.72)
     add_child(_carry_anchor)
+    call_deferred("_lock_post")
+
+
+func _lock_post() -> void:
+    if _post_locked:
+        return
+    post = global_position
+    _post_locked = true
+
+
+func engage_range() -> float:
+    match archetype:
+        RUNNER:
+            return 12.0
+        THROWER:
+            return 14.0
+        HEAVY:
+            return 8.5
+        PLATE:
+            return 7.0
+        RIGGER:
+            return 9.0
+        _:
+            return 8.0
 
 
 func configure_archetype(id: int) -> void:
@@ -260,6 +287,7 @@ func take_hit(force: Vector3, damage: float) -> void:
     health -= incoming
     stagger = float(stats.stagger)
     hit_anim = 0.30
+    aggro = maxf(aggro, 8.0)
     attack_windup = 0.0
     attack_landed = false
     velocity += force * float(stats.resistance)
@@ -430,6 +458,34 @@ func _physics_process(delta: float) -> void:
         _animate(delta)
         return
     if target == null or not is_instance_valid(target):
+        _work_post(delta)
+        move_and_slide()
+        _animate(delta)
+        return
+
+    if not _post_locked:
+        _lock_post()
+
+    var to_player: Vector3 = target.global_position - global_position
+    to_player.y = 0.0
+    var player_dist := to_player.length()
+    if player_dist <= engage_range():
+        aggro = maxf(aggro, 2.4)
+    elif player_dist > engage_range() + 6.0:
+        aggro = maxf(0.0, aggro - delta * 0.85)
+
+    if aggro <= 0.05:
+        if archetype == RIGGER:
+            if _work_toward_machine(delta):
+                move_and_slide()
+                _animate(delta)
+                return
+        if archetype == THROWER:
+            if _haul_scrap_to_post(delta):
+                move_and_slide()
+                _animate(delta)
+                return
+        _work_post(delta)
         move_and_slide()
         _animate(delta)
         return
@@ -574,6 +630,69 @@ func _find_claimable_machine() -> FoundryMachine:
             best_distance = distance
             best = machine
     return best
+
+
+func _work_post(delta: float) -> void:
+    var to_post: Vector3 = post - global_position
+    to_post.y = 0.0
+    var dist := to_post.length()
+    if dist > 1.4:
+        var dir := to_post.normalized()
+        velocity.x = move_toward(velocity.x, dir.x * speed * 0.72, 16.0 * delta)
+        velocity.z = move_toward(velocity.z, dir.z * speed * 0.72, 16.0 * delta)
+        rotation.y = rotate_toward(
+            rotation.y,
+            atan2(-dir.x, -dir.z),
+            deg_to_rad(120.0) * delta
+        )
+    else:
+        velocity.x = move_toward(velocity.x, 0.0, 14.0 * delta)
+        velocity.z = move_toward(velocity.z, 0.0, 14.0 * delta)
+
+
+## Idle thrower work: pick scrap, carry it to the post, put it down.
+## Throwing at the player is a fight verb, not a job.
+func _haul_scrap_to_post(delta: float) -> bool:
+    if _grip.is_holding():
+        _grip.update(_carry_anchor, velocity)
+        var to_post: Vector3 = post - global_position
+        to_post.y = 0.0
+        if to_post.length() <= 1.5:
+            _grip.release(Vector3(0.0, 0.4, 0.0), false)
+            _salvage_cooldown = 1.6
+            return true
+        var dir := to_post.normalized()
+        velocity.x = move_toward(velocity.x, dir.x * speed * 0.80, 16.0 * delta)
+        velocity.z = move_toward(velocity.z, dir.z * speed * 0.80, 16.0 * delta)
+        rotation.y = rotate_toward(
+            rotation.y,
+            atan2(-dir.x, -dir.z),
+            deg_to_rad(130.0) * delta
+        )
+        return true
+    if _salvage_cooldown > 0.0:
+        return false
+    var salvage := _find_salvage()
+    if salvage == null:
+        _salvage_cooldown = 1.4
+        return false
+    var to_salvage: Vector3 = salvage.global_position - global_position
+    to_salvage.y = 0.0
+    if to_salvage.length() <= 1.6:
+        if _grip.grab(salvage, _carry_anchor, false):
+            _throw_cooldown = 0.4
+        else:
+            _salvage_cooldown = 1.0
+        return true
+    var dir := to_salvage.normalized()
+    velocity.x = move_toward(velocity.x, dir.x * speed * 0.80, 16.0 * delta)
+    velocity.z = move_toward(velocity.z, dir.z * speed * 0.80, 16.0 * delta)
+    rotation.y = rotate_toward(
+        rotation.y,
+        atan2(-dir.x, -dir.z),
+        deg_to_rad(130.0) * delta
+    )
+    return true
 
 
 ## The thrower's answer is that the yard is full of ammunition.

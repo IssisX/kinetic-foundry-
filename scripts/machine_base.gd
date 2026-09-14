@@ -37,6 +37,10 @@ var machine_mass := 2600.0
 var _grip := MachineGrip.new()
 var _hijack_candidate: Node3D
 var _hijack_timeout := 0.0
+var work_anchor := Vector3.ZERO
+var work_heading := 0.0
+var _work_sign := 1.0
+var _floor_exclude: Array[RID] = []
 
 
 func _ready() -> void:
@@ -44,6 +48,25 @@ func _ready() -> void:
     collision_layer = 2
     collision_mask = 1 | 4 | 8
     MaterialResponse.register(self, machine_material, machine_tint)
+    call_deferred("_lock_work_station")
+
+
+func _lock_work_station() -> void:
+    work_anchor = global_position
+    work_heading = rotation.y
+    _collect_floor_rids()
+
+
+func _collect_floor_rids() -> void:
+    _floor_exclude.clear()
+    if not is_inside_tree():
+        return
+    for node in get_tree().get_nodes_in_group("yard_substrate"):
+        if node is CollisionObject3D:
+            _floor_exclude.append((node as CollisionObject3D).get_rid())
+    var ground := get_tree().root.find_child("Ground", true, false)
+    if ground is CollisionObject3D:
+        _floor_exclude.append((ground as CollisionObject3D).get_rid())
 
 
 func configure(controls, camera) -> void:

@@ -201,21 +201,32 @@ func _enemy_control(delta: float) -> void:
         velocity.z = move_toward(velocity.z, 0.0, 16.0 * delta)
         return
     _ai_time += delta
-    var target := get_tree().get_first_node_in_group("player")
-    if target == null:
-        return
-    var to_target: Vector3 = target.global_position - global_position
-    to_target.y = 0.0
-    if to_target.length() > 0.1:
-        var desired: float = atan2(-to_target.x, -to_target.z)
-        rotation.y = lerp_angle(rotation.y, desired, 0.016)
+    var player := get_tree().get_first_node_in_group("player")
+    if player != null and is_instance_valid(player) and player.visible:
+        var to_player: Vector3 = player.global_position - global_position
+        to_player.y = 0.0
+        if to_player.length() < 5.5:
+            rotation.y = lerp_angle(rotation.y, atan2(-to_player.x, -to_player.z), 0.03)
+            velocity.x = move_toward(velocity.x, 0.0, 8.0 * delta)
+            velocity.z = move_toward(velocity.z, 0.0, 8.0 * delta)
+            blade_lift = move_toward(blade_lift, 0.05, delta)
+            return
+
+    var home := work_anchor if work_anchor.length_squared() > 0.01 else global_position
+    var heading := Vector3(-sin(work_heading), 0.0, -cos(work_heading))
+    var along := (global_position - home).dot(heading)
+    if along > 6.5:
+        _work_sign = -1.0
+    elif along < -1.5:
+        _work_sign = 1.0
+    var desired_yaw := work_heading if _work_sign > 0.0 else work_heading + PI
+    rotation.y = lerp_angle(rotation.y, desired_yaw, 0.018)
     var forward := -global_basis.z
-    var throttle := 1.0 if to_target.length() > 6.0 else 0.35
     var track := maxf(get_track_ratio(), 0.22)
-    velocity.x = forward.x * throttle * drive_speed * 0.42 * track
-    velocity.z = forward.z * throttle * drive_speed * 0.42 * track
-    blade_lift = 0.08 + 0.10 * sin(_ai_time * 0.55)
-    blade_tilt = 0.08 * sin(_ai_time * 0.40)
+    velocity.x = forward.x * drive_speed * 0.34 * track
+    velocity.z = forward.z * drive_speed * 0.34 * track
+    blade_lift = 0.06
+    blade_tilt = 0.06 * sin(_ai_time * 0.30)
 
 
 func _apply_pose() -> void:

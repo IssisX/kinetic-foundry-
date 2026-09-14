@@ -20,7 +20,7 @@ const SHIN_LEN := 0.44
 const LEG_LEN := THIGH_LEN + SHIN_LEN
 const ANKLE_TO_SOLE := 0.125
 const FOOT_HALF_LENGTH := 0.21
-const STEP_WIDTH := 0.09
+const STEP_WIDTH := 0.26
 const BASE_PELVIS_HEIGHT := 0.94
 const GRAVITY := 9.81
 const V_COMFORT := 0.45 * sqrt(GRAVITY * LEG_LEN)
@@ -127,6 +127,7 @@ func animate(
         head_root.rotation.x = hit_amount * 0.22
 
     _apply_crush(delta)
+    _express()
     _apply_death(delta, dead)
     _update_diagnostics(delta)
 
@@ -642,11 +643,7 @@ func _solve_leg(
         0.0
     ))
     var forward := _movement_forward()
-    var pole := (
-        hip_position
-        + forward * 0.45
-        + Vector3.UP * 0.10
-    )
+    var pole := hip_position + forward * 0.55 + Vector3.UP * 0.08
     var pole_vector := pole - hip_position
     var perpendicular := (
         pole_vector
@@ -655,6 +652,8 @@ func _solve_leg(
     if perpendicular.length_squared() < 0.001:
         perpendicular = forward
     perpendicular = perpendicular.normalized()
+    if perpendicular.dot(forward) < 0.0:
+        perpendicular = -perpendicular
     var knee_position := (
         hip_position
         + direction * along
@@ -742,7 +741,12 @@ func _bone_basis(
     if x_axis.length_squared() < 0.001:
         x_axis = forward_hint.cross(y_axis)
     x_axis = x_axis.normalized()
+    if x_axis.dot(right_hint) < 0.0:
+        x_axis = -x_axis
     var z_axis := x_axis.cross(y_axis).normalized()
+    if z_axis.dot(-forward_hint) < 0.0:
+        z_axis = -z_axis
+        x_axis = -x_axis
     return Basis(x_axis, y_axis, z_axis).orthonormalized()
 
 func _pose_upper_body(speed: float) -> void:

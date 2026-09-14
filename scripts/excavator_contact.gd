@@ -440,6 +440,16 @@ func _react_to_arm_contacts(contacts: Array[Node]) -> void:
         )
 
 func _resolve_arm_contact_pose() -> void:
+    var arm_moved := (
+        absf(boom_angle - _safe_boom_angle) > 0.003
+        or absf(stick_angle - _safe_stick_angle) > 0.003
+        or absf(tool_angle - _safe_tool_angle) > 0.003
+        or absf(arm_yaw - _safe_arm_yaw) > 0.003
+        or _tool_tip_speed > 0.40
+    )
+    if not arm_moved:
+        _apply_arm_pose()
+        return
     var target_boom := boom_angle
     var target_stick := stick_angle
     var target_tool := tool_angle
@@ -459,7 +469,7 @@ func _resolve_arm_contact_pose() -> void:
     var low := 0.0
     var high := 1.0
     var best := 0.0
-    for _i in 6:
+    for _i in 3:
         var mid := (low + high) * 0.5
         _set_interpolated_arm_pose(
             target_boom,
@@ -501,6 +511,10 @@ func _push_dynamic_arm_contacts() -> void:
     var exclude: Array[RID] = [get_rid()]
     if held_load is CollisionObject3D:
         exclude.append(held_load.get_rid())
+    if has_method("_arm_query_exclude"):
+        exclude = _arm_query_exclude()
+        if held_load is CollisionObject3D:
+            exclude.append(held_load.get_rid())
 
     var affected: Dictionary = {}
     _collect_dynamic_hits(_arm_shapes, exclude, affected)
@@ -596,7 +610,7 @@ func _collect_dynamic_hits(
         query.collide_with_bodies = true
         query.collide_with_areas = false
         query.exclude = exclude
-        var hits := space.intersect_shape(query, 24)
+        var hits := space.intersect_shape(query, 8)
         for hit in hits:
             var body = hit.get("collider")
             if not (body is RigidBody3D) or body.freeze or body == held_load:

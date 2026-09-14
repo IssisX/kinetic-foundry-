@@ -1,4 +1,4 @@
-# Kinetic Foundry — Vertical Slice 0.3
+# Kinetic Foundry — Vertical Slice 0.4
 
 Godot 4.3 source-first rebuild for Android/mobile.
 
@@ -9,8 +9,10 @@ Godot 4.3 source-first rebuild for Android/mobile.
 - Touch joystick + right-side look input.
 - Character-relative attack/grab/use intent.
 - Faces, a spine, and hips that counter-rotate while walking.
+- Crew with different faces, box torsos, and no hat-brim facemask.
+- Crew hold posts. Machines work their station. They do not shadow the player.
 - Adaptive target commitment during combat/grapples.
-- Enemy pursuit and attacks.
+- Enemy pursuit and attacks once the player enters range or lands a hit.
 - Enemy-held excavator and dozer that can be hijacked.
 - Player-driven excavator, crane, and tracked dozer.
 - Direct boom/stick/tool, slew/luff/hoist, and blade/ripper control.

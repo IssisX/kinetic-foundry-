@@ -1,4 +1,4 @@
-# Kinetic Foundry — Game Design Authority v0.1
+# Kinetic Foundry — Game Design Authority v0.4
 
 ## North star
 A grounded 3D industrial-dystopia action game where **power, combat, and
@@ -72,6 +72,14 @@ Mostly human factions use the same industrial world as the player. They may
 commandeer machines, reposition barriers, destroy cover, reclaim equipment,
 abandon damaged machinery, fight rival groups, and manipulate environmental
 hazards.
+
+Crew hold a post. A rigger's job is a machine. A thrower's job is salvage.
+Everyone else stays on station until the player enters range or hits them.
+Hostile machines work their lane; they do not drive across the yard after
+the player. Contest happens at the station.
+
+People are readable: a face, a box torso, limbs that match the hips. No
+hat brim across the eyes, no shoulder capsule that reads as a hubcap.
 
 ## Campaign
 A hybrid industrial campaign with distinct physical objectives and long-term

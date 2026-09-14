@@ -368,6 +368,6 @@ func _reclaim_machine(machine) -> bool:
         )
         _reclaim_cooldown = 6.0
         return true
-    if best.has_method("set_target") and best_distance < 15.0:
+    if best.archetype == EnemyScene.RIGGER and best.has_method("set_target") and best_distance < 15.0:
         best.set_target(machine)
     return false
