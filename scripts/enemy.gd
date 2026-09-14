@@ -835,6 +835,13 @@ func _work_the_scrap_pile(delta: float) -> bool:
     to_target.y = 0.0
     var distance := to_target.length()
 
+    # Same precedent as the rigger's own answer to a fight: seeking ammo is
+    # only worth it when the target is far enough away that walking for it
+    # beats just fighting. Up close, fall through to melee instead of
+    # wandering off after scrap while someone is already on top of it.
+    if not _grip.is_holding() and distance <= THROW_RANGE_MIN:
+        return false
+
     if _grip.is_holding():
         _grip.update(_carry_anchor, velocity)
         if (

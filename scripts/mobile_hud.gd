@@ -51,6 +51,11 @@ func _ready() -> void:
     mouse_filter = Control.MOUSE_FILTER_IGNORE
     set_process_input(true)
     set_process(true)
+    # Label layout lives entirely in _process(). Both the capture harness and
+    # the pause menu pause the tree; without this, whichever one pauses first
+    # freezes every label at its construction-time (0,0) default forever,
+    # since it may never have run _process() even once yet.
+    process_mode = Node.PROCESS_MODE_ALWAYS
     _build_labels()
     _resize_to_viewport()
 
