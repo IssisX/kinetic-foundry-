@@ -7,17 +7,35 @@ const GeomUtil = preload("res://scripts/geom.gd")
 var rotors: Array[Node3D] = []
 
 func _ready() -> void:
-    _spawn_pressure_vent(Vector3(-15.3, 0.0, 5.5), -0.34, 0.0)
-    _spawn_pressure_vent(Vector3(7.8, 0.0, -10.8), 2.45, 2.1)
+    # Each vent is bound to the accumulator and relief it actually sits on,
+    # so its cycle comes from that branch's pressure rather than a phase
+    # offset chosen to keep the two from firing together.
+    _spawn_pressure_vent(
+        Vector3(-15.3, 0.0, 5.5),
+        -0.34,
+        "west_plenum",
+        "RELIEF_WEST"
+    )
+    _spawn_pressure_vent(
+        Vector3(7.8, 0.0, -10.8),
+        2.45,
+        "east_plenum",
+        "RELIEF_EAST"
+    )
     _build_exhaust_fans()
     _build_gantry_load()
 
-func _spawn_pressure_vent(pos: Vector3, yaw: float, offset: float) -> void:
+func _spawn_pressure_vent(
+        pos: Vector3,
+        yaw: float,
+        plenum_id: String,
+        relief_id: String
+) -> void:
     var vent := PressureVentScript.new()
     vent.position = pos
     vent.rotation.y = yaw
     add_child(vent)
-    vent.configure(offset)
+    vent.configure(plenum_id, relief_id)
 
 func _build_gantry_load() -> void:
     var load := GantryLoadScript.new()

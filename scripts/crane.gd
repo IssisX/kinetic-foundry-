@@ -35,6 +35,9 @@ const SLEW_RATE := 0.62
 const LUFF_RATE := 0.34
 const HOIST_RATE := 2.05
 const GRAB_MASS_LIMIT := 1900.0
+## Combined slew/luff/hoist rate that counts as asking the supply for
+## everything it can move.
+const FULL_ACTUATOR_RATE := 1.6
 
 var drive_speed := 3.4
 var turn_speed := 0.72
@@ -64,6 +67,9 @@ var _tipping_ratio := 0.0
 var _tip_direction_local := Vector3.ZERO
 var _impact_cooldown := 0.0
 var _contact_targets: Array[Node] = []
+var _demand_slew := 0.0
+var _demand_luff := 0.0
+var _demand_rope := 0.0
 var _warn_cooldown := 0.0
 var _tipping_damage_bank := 0.0
 
@@ -110,8 +116,22 @@ func get_control_profile() -> Dictionary:
     }
 
 
+func process_supply_id() -> String:
+    return "crane_supply"
+
+
+## The winch and the luff rams answer to the same two shortages the rest of
+## the yard does: a wrecked hoist, or a branch with nothing in it.
 func get_hydraulic_ratio() -> float:
-    return clampf(hoist_health / 240.0, 0.0, 1.0)
+    return clampf(
+        hoist_health / 240.0 * supply_pressure_ratio(),
+        0.0,
+        1.0
+    )
+
+
+func actuator_speed_ratio() -> float:
+    return maxf(supply_flow_ratio(), 0.18)
 
 
 func get_track_ratio() -> float:
@@ -226,12 +246,28 @@ func _physics_process(delta: float) -> void:
     _update_clamp(delta)
     _update_tipping(delta)
     _resolve_hook_contacts()
+    _publish_hydraulic_demand(delta)
+
+
+## Slew, luff and winch all draw from the same supply while they move. Rope
+## payout is metres rather than radians, so it is weighted into the same
+## scale rather than added raw.
+func _publish_hydraulic_demand(delta: float) -> void:
+    var rate := (
+        absf(slew_angle - _demand_slew)
+        + absf(luff_angle - _demand_luff)
+        + absf(rope_length - _demand_rope) * 0.45
+    ) / maxf(delta, 0.001)
+    _demand_slew = slew_angle
+    _demand_luff = luff_angle
+    _demand_rope = rope_length
+    publish_actuator_demand(rate, FULL_ACTUATOR_RATE)
 
 
 func _player_control(delta: float) -> void:
     if hud == null:
         return
-    var hoist_authority := maxf(get_hydraulic_ratio(), 0.22)
+    var hoist_authority := maxf(get_hydraulic_ratio(), 0.22) * actuator_speed_ratio()
     # A crane close to tipping does not get to swing faster.
     var authority := clampf(1.0 - maxf(_tipping_ratio - 0.55, 0.0) * 0.85, 0.30, 1.0)
 

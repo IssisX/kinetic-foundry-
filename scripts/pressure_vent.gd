@@ -1,19 +1,37 @@
 extends Node3D
 
+## A relief vent on the process loop.
+##
+## Nothing here keeps time. The vent blows when its accumulator has reached
+## cracking pressure and stops when it has blown down to reseat, which is a
+## relaxation cycle the network runs, not a timer this node owns. A branch
+## that can no longer reach cracking pressure - because a breach upstream is
+## outflowing the pump, or because somebody shut its valve - simply never
+## fires again, and how hard it hits is the discharge power it actually has.
+
 const GeomUtil = preload("res://scripts/geom.gd")
 
-var cycle_time := 4.4
-var burst_duration := 0.72
-var phase_offset := 0.0
-var timer := 0.0
+## Pressure times volumetric flow is the power leaving the orifice. This is
+## the reference an intact loop delivers; the blast scales against it.
+const REFERENCE_BLAST_POWER := 1.15e5
+const BLAST_INTERVAL := 0.13
+const BASE_BLAST_DAMAGE := 5.5
+
+var plenum_id := "east_plenum"
+var relief_id := "RELIEF_EAST"
+
 var tick := 0.0
 var area: Area3D
 var warning_light: OmniLight3D
 var puffs: Array[MeshInstance3D] = []
 
-func configure(offset: float = 0.0) -> void:
-    phase_offset = offset
-    timer = offset
+var _burst_phase := 0.0
+var _intensity := 0.0
+var _open := false
+
+func configure(plenum: String, relief: String) -> void:
+    plenum_id = plenum
+    relief_id = relief
 
 func _ready() -> void:
     _build_visual()
@@ -66,34 +84,67 @@ func _build_area() -> void:
     area.add_child(collision)
 
 func _process(delta: float) -> void:
-    timer = fmod(timer + delta, cycle_time)
+    var state := ProcessPlant.vent_state(plenum_id, relief_id)
+    _open = bool(state.get("open", false))
+    _intensity = clampf(
+        float(state.get("pressure", 0.0)) * float(state.get("flow", 0.0))
+        / REFERENCE_BLAST_POWER,
+        0.0,
+        1.4
+    )
     tick = maxf(0.0, tick - delta)
-    var active := timer < burst_duration
-    var warning_window := timer > cycle_time - 1.0
-    warning_light.light_energy = 3.8 if active else (1.8 if warning_window else 0.45)
-    _animate_steam(active)
-    if active and tick <= 0.0:
-        tick = 0.13
+
+    # The beacon reads the charge the accumulator has built, so a dead
+    # branch shows a dead lamp rather than a countdown to nothing.
+    var charge := float(state.get("charge", 0.0))
+    if _open:
+        warning_light.light_energy = 1.2 + _intensity * 3.2
+        _burst_phase += delta
+    else:
+        warning_light.light_energy = 0.28 + charge * charge * 1.6
+        _burst_phase = 0.0
+
+    _animate_steam(_open)
+    if _open and _intensity > 0.05 and tick <= 0.0:
+        tick = BLAST_INTERVAL
         _apply_blast()
 
 func _animate_steam(active: bool) -> void:
     for i in puffs.size():
         var puff := puffs[i]
-        if not active:
+        if not active or _intensity <= 0.02:
             puff.visible = false
             continue
-        var t := fposmod(timer / burst_duration + float(i) * 0.145, 1.0)
+        var t := fposmod(_burst_phase * 1.35 + float(i) * 0.145, 1.0)
         puff.visible = true
-        puff.position = Vector3(sin(float(i) * 2.1) * 0.18 * t, 1.34 + sin(float(i) * 1.37) * 0.10 * t, -1.52 - t * 5.25)
-        var s := 0.55 + t * 1.35
+        var reach := 5.25 * clampf(_intensity, 0.25, 1.4)
+        puff.position = Vector3(
+            sin(float(i) * 2.1) * 0.18 * t,
+            1.34 + sin(float(i) * 1.37) * 0.10 * t,
+            -1.52 - t * reach
+        )
+        var s := (0.55 + t * 1.35) * clampf(_intensity, 0.35, 1.3)
         puff.scale = Vector3(s * 0.82, s, s * 1.18)
 
 func _apply_blast() -> void:
     var dir := -global_basis.z
+    var scale := _intensity
     for body in area.get_overlapping_bodies():
         if not is_instance_valid(body):
             continue
         if body.has_method("receive_hazard_hit"):
-            body.receive_hazard_hit(5.5, dir * 4.8 + Vector3.UP * 1.6)
+            body.receive_hazard_hit(
+                BASE_BLAST_DAMAGE * scale,
+                (dir * 4.8 + Vector3.UP * 1.6) * scale
+            )
         elif body.has_method("take_hit"):
-            body.take_hit(dir * 9.0 + Vector3.UP * 2.2, 7.0)
+            body.take_hit(
+                (dir * 9.0 + Vector3.UP * 2.2) * scale,
+                7.0 * scale
+            )
+
+func vent_intensity() -> float:
+    return _intensity
+
+func is_blowing() -> bool:
+    return _open

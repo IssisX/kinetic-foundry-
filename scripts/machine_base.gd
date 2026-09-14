@@ -27,9 +27,13 @@ var machine_material := FoundryMaterial.PAINTED_STEEL
 var machine_tint := Color(0.68, 0.37, 0.045)
 var machine_mass := 2600.0
 
+## How fast reported actuator demand chases the real pose rate, per second.
+const DEMAND_RESPONSE := 6.0
+
 var _grip := MachineGrip.new()
 var _hijack_candidate: Node3D
 var _hijack_timeout := 0.0
+var _supply_demand := 0.0
 
 
 func _ready() -> void:
@@ -37,11 +41,60 @@ func _ready() -> void:
     collision_layer = 2
     collision_mask = 1 | 4 | 8
     MaterialResponse.register(self, machine_material, machine_tint)
+    var supply := process_supply_id()
+    if supply != "":
+        ProcessPlant.bind_machine(self, supply)
 
 
 func configure(controls, camera) -> void:
     hud = controls
     camera_rig = camera
+
+
+## Which supply point on the process graph feeds this machine. A machine
+## that names nothing runs off its own tank and reads full supply forever,
+## which is what keeps an unplumbed machine behaving exactly as before.
+func process_supply_id() -> String:
+    return ""
+
+
+## What the branch can push. Pressure is the force limit: an actuator with
+## no pressure behind it cannot exert, at any speed.
+func supply_pressure_ratio() -> float:
+    return clampf(
+        float(ProcessPlant.machine_supply_state(self).get("pressure_ratio", 1.0)),
+        0.0,
+        1.0
+    )
+
+
+## What the branch can move. Flow is the speed limit: a starved actuator
+## still holds its load, it just crawls.
+func supply_flow_ratio() -> float:
+    return clampf(
+        float(ProcessPlant.machine_supply_state(self).get("flow_ratio", 1.0)),
+        0.0,
+        1.0
+    )
+
+
+## Actuators only draw oil while they are actually moving. Reporting the
+## real pose rate means a machine working hard loads the loop and a parked
+## one stops competing with the vents for flow.
+##
+## The demand is filtered rather than published raw, because what it feeds
+## comes back as the speed limit on the very motion it was measured from: a
+## starved arm would otherwise stutter between asking for everything and
+## asking for nothing at frame rate. A pump compensator has exactly this
+## lag for exactly this reason.
+func publish_actuator_demand(pose_rate: float, reference_rate: float) -> void:
+    var target := clampf(pose_rate / maxf(reference_rate, 0.001), 0.0, 1.0)
+    _supply_demand = lerpf(
+        _supply_demand,
+        target,
+        clampf(DEMAND_RESPONSE * get_physics_process_delta_time(), 0.0, 1.0)
+    )
+    ProcessPlant.request_machine_supply(self, _supply_demand)
 
 
 ## Readable name for prompts and machine telemetry.

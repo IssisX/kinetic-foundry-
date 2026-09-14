@@ -56,6 +56,9 @@ var _plate: MeshInstance3D
 var _plate_state: SurfaceState
 var _plate_work := 0.0
 var _machine_goal: FoundryMachine
+var _valve_goal: Node3D
+var _valve_plan := ""
+var _process_clock := 0.0
 var _grip := MachineGrip.new()
 var _carry_anchor: Node3D
 var _throw_cooldown := 0.0
@@ -477,11 +480,142 @@ func _physics_process(delta: float) -> void:
 func _pursue_archetype_goal(delta: float) -> bool:
     match archetype:
         RIGGER:
+            if _work_the_process_plant(delta):
+                return true
             return _work_toward_machine(delta)
         THROWER:
             return _work_the_scrap_pile(delta)
         _:
             return false
+
+
+## How often a rigger is willing to re-read the plant and change its mind.
+const PROCESS_REVIEW_INTERVAL := 1.1
+## Riggers do not all crowd the same handwheel.
+const VALVE_CLAIM_META := "process_claim"
+## Close enough to be in a fight is too close to walk off to a valve.
+const PROCESS_ERRAND_RANGE := 5.5
+
+
+## The rigger knows the yard's plumbing, and that makes a handwheel either a
+## weapon or a repair depending on who is holding what. Every plan comes
+## from the graph's own reachability answer, so a rigger cannot set off
+## toward a valve that would not actually do the thing it wants done.
+func _work_the_process_plant(delta: float) -> bool:
+    _process_clock = maxf(0.0, _process_clock - delta)
+    if is_instance_valid(_valve_goal):
+        return _drive_to_valve(delta)
+    _valve_goal = null
+    if _process_clock > 0.0:
+        return false
+    var reach: Vector3 = target.global_position - global_position
+    reach.y = 0.0
+    if reach.length() < PROCESS_ERRAND_RANGE:
+        return false
+    _process_clock = PROCESS_REVIEW_INTERVAL
+    var plan := _choose_process_plan()
+    if plan.is_empty():
+        return false
+    var body = plan.get("body")
+    if body == null or not is_instance_valid(body):
+        return false
+    if _valve_claimed_by_other(body):
+        return false
+    body.set_meta(VALVE_CLAIM_META, get_instance_id())
+    _valve_goal = body
+    _valve_plan = str(plan.get("kind", ""))
+    return _drive_to_valve(delta)
+
+
+## A yard bleeding its own tank dry outranks everything. After that, if the
+## intruder is sitting in one of the machines, take its supply away. With
+## nothing else to do, put back whatever is standing closed for no reason.
+func _choose_process_plan() -> Dictionary:
+    var plan := ProcessPlant.plan_isolation()
+    if not plan.is_empty():
+        plan["kind"] = "isolate"
+        return plan
+    var driven := _player_driven_machine()
+    if driven != null:
+        plan = ProcessPlant.plan_supply_denial(driven)
+        if not plan.is_empty():
+            plan["kind"] = "deny"
+            return plan
+        # Its supply is already cut. Restoring lines while an intruder is
+        # sitting in one of the machines would just hand it back, so the
+        # crew leaves the yard shut down until the cab is empty again.
+        return {}
+    plan = ProcessPlant.plan_restoration()
+    if not plan.is_empty():
+        plan["kind"] = "restore"
+    return plan
+
+
+func _player_driven_machine() -> FoundryMachine:
+    for machine in get_tree().get_nodes_in_group("machine"):
+        if not is_instance_valid(machine) or machine.disabled:
+            continue
+        if machine.player_driver != null:
+            return machine
+    return null
+
+
+func _drive_to_valve(delta: float) -> bool:
+    var to_valve: Vector3 = _valve_goal.global_position - global_position
+    to_valve.y = 0.0
+    var distance := to_valve.length()
+    var reach := 2.6
+    if _valve_goal.has_method("operate_reach"):
+        reach = float(_valve_goal.operate_reach())
+    if distance <= reach:
+        _operate_valve_goal()
+        velocity.x = move_toward(velocity.x, 0.0, 20.0 * delta)
+        velocity.z = move_toward(velocity.z, 0.0, 20.0 * delta)
+        return true
+
+    var dir := to_valve.normalized()
+    var ground_speed := speed * _ground_traction()
+    velocity.x = move_toward(velocity.x, dir.x * ground_speed, 18.0 * delta)
+    velocity.z = move_toward(velocity.z, dir.z * ground_speed, 18.0 * delta)
+    rotation.y = rotate_toward(
+        rotation.y,
+        atan2(-dir.x, -dir.z),
+        deg_to_rad(150.0) * delta
+    )
+    return true
+
+
+## The aperture is set rather than toggled: by the time the rigger reaches
+## the wheel somebody else may have moved it, and the plan was to have this
+## line shut or open, not to have it changed.
+func _operate_valve_goal() -> void:
+    if _valve_goal.has_method("set_target_aperture"):
+        _valve_goal.set_target_aperture(1.0 if _valve_plan == "restore" else 0.0)
+    _release_valve_claim()
+    _valve_goal = null
+    _valve_plan = ""
+    _process_clock = 2.6
+
+
+func _valve_claimed_by_other(body: Node) -> bool:
+    if not body.has_meta(VALVE_CLAIM_META):
+        return false
+    var claimer := int(body.get_meta(VALVE_CLAIM_META))
+    if claimer == get_instance_id():
+        return false
+    var other := instance_from_id(claimer)
+    if other == null or not is_instance_valid(other):
+        return false
+    return not bool(other.get("dead"))
+
+
+func _release_valve_claim() -> void:
+    if not is_instance_valid(_valve_goal):
+        return
+    if not _valve_goal.has_meta(VALVE_CLAIM_META):
+        return
+    if int(_valve_goal.get_meta(VALVE_CLAIM_META)) == get_instance_id():
+        _valve_goal.remove_meta(VALVE_CLAIM_META)
 
 
 ## The rigger's answer to a fight is to go and get a machine - but only when

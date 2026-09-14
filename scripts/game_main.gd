@@ -14,6 +14,7 @@ const MissionDirectorScene = preload("res://scripts/mission_director.gd")
 const CaptureRunnerScene = preload("res://scripts/visual_capture.gd")
 const CraneCheckScene = preload("res://scripts/crane_check.gd")
 const EnemyCheckScene = preload("res://scripts/enemy_check.gd")
+const ProcessCheckScene = preload("res://scripts/process_check.gd")
 const LoadPathCouplerScene = preload(
     "res://scripts/load_path_coupler.gd"
 )
@@ -51,6 +52,10 @@ func _ready() -> void:
         var enemy_check := EnemyCheckScene.new()
         add_child(enemy_check)
         enemy_check.begin(self)
+    elif OS.get_environment("KF_PROCESS_CHECK") == "1":
+        var process_check := ProcessCheckScene.new()
+        add_child(process_check)
+        process_check.begin(self)
 
 func _process(delta: float) -> void:
     if OS.get_environment("KF_CAPTURE") == "1":
@@ -169,6 +174,23 @@ func _build_gameplay() -> void:
     add_child(load_path_coupler)
     load_path_coupler.configure(structure, excavator)
 
+    # The plant outlives any one scene, so the connection is made once.
+    if not ProcessPlant.rupture_opened.is_connected(_on_rupture_opened):
+        ProcessPlant.rupture_opened.connect(_on_rupture_opened)
+
+
+## Losing a line is something an operator finds out about the moment the
+## gauges move. Naming the run tells the player which valve station is worth
+## walking to, without telling them what to do about it.
+func _on_rupture_opened(edge_id: String, _world_point: Vector3) -> void:
+    if hud == null:
+        return
+    hud.set_context(
+        "LINE BREACHED // %s // PRESSURE FALLING" % ProcessPlant.edge_label(
+            ProcessPlant.edge_index(edge_id)
+        )
+    )
+
 func _build_mission() -> void:
     mission = MissionDirectorScene.new()
     add_child(mission)
@@ -188,11 +210,33 @@ func _retarget_enemies(target_node) -> void:
             enemy.set_target(target_node)
 
 func _on_player_use(user) -> void:
+    # A valve has a much shorter reach than a machine's climb range, so
+    # standing at the handwheel means the handwheel, and anywhere else near
+    # a machine still means the machine.
+    var valve = _nearest_valve(user.global_position)
+    if valve != null:
+        valve.operate(user)
+        if hud != null:
+            hud.set_context(valve.status_text())
+        return
     var machine = _nearest_machine(user.global_position)
     if machine != null and machine.request_hijack(user):
         return
     if hud != null and hud.has_method("set_interaction_hint"):
         hud.set_interaction_hint("MOVE CLOSER // USE WHEN A MACHINE IS WITHIN REACH")
+
+
+func _nearest_valve(from: Vector3):
+    var best = null
+    var best_distance := INF
+    for valve in get_tree().get_nodes_in_group("process_valve"):
+        if not is_instance_valid(valve):
+            continue
+        var distance: float = valve.global_position.distance_to(from)
+        if distance <= valve.operate_reach() and distance < best_distance:
+            best_distance = distance
+            best = valve
+    return best
 
 
 ## Machines are interchangeable to everything outside them: whichever one
@@ -271,6 +315,16 @@ func _update_interaction_prompt() -> void:
             return
     if not player.visible or player.health <= 0.0:
         hud.set_interaction_hint("")
+        return
+
+    var valve = _nearest_valve(player.global_position)
+    if valve != null:
+        hud.set_interaction_hint(
+            "USE  //  %s  //  %s" % [
+                "CLOSE" if valve.is_open() else "OPEN",
+                valve.status_text()
+            ]
+        )
         return
 
     var target = _nearest_machine(player.global_position)

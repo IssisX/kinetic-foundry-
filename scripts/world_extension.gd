@@ -5,6 +5,7 @@ const StorageVessels = preload("res://scripts/world_storage_vessels.gd")
 const UtilityZone = preload("res://scripts/world_utility_zone.gd")
 const ScaffoldZone = preload("res://scripts/world_scaffold_zone.gd")
 const BreachZone = preload("res://scripts/world_breach_zone.gd")
+const ProcessPlumbing = preload("res://scripts/process_plumbing.gd")
 
 func _ready() -> void:
     call_deferred("_attach")
@@ -14,7 +15,7 @@ func _attach() -> void:
     var scene := get_tree().current_scene
     if scene == null:
         return
-    for script in [YardSurface, StorageVessels, UtilityZone, ScaffoldZone, BreachZone]:
+    for script in [YardSurface, StorageVessels, UtilityZone, ScaffoldZone, BreachZone, ProcessPlumbing]:
         var node := Node3D.new()
         node.set_script(script)
         scene.add_child(node)

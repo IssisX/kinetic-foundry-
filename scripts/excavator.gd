@@ -16,6 +16,15 @@ var ai_time := 0.0
 var hydraulic_health := 260.0
 var track_health := 320.0
 
+## Total joint rate, in radians per second across all four actuators, that
+## counts as asking the supply for everything it has.
+const FULL_ACTUATOR_RATE := 2.4
+
+var _demand_boom := 0.0
+var _demand_stick := 0.0
+var _demand_tool := 0.0
+var _demand_yaw := 0.0
+
 var _boom: Node3D
 var _stick: Node3D
 var _tool: Node3D
@@ -61,16 +70,37 @@ func _ready() -> void:
                 _arm_shapes.append(shape)
     _store_safe_arm_pose()
 
+func process_supply_id() -> String:
+    return "excavator_supply"
+
+
+## Two separate things can leave this machine without hydraulics: its own
+## hoses being wrecked, and the branch that feeds them losing pressure.
+## Neither substitutes for the other, so the worse of the two governs.
 func get_hydraulic_ratio() -> float:
-    return clampf(hydraulic_health / 260.0, 0.0, 1.0)
+    return clampf(
+        hydraulic_health / 260.0 * supply_pressure_ratio(),
+        0.0,
+        1.0
+    )
+
+
+## Flow is what moves the arm. A starved supply still holds a load up, it
+## just cannot swing it, which is a different failure from losing pressure.
+func actuator_speed_ratio() -> float:
+    return maxf(supply_flow_ratio(), 0.18)
 
 func get_track_ratio() -> float:
     return clampf(track_health / 320.0, 0.0, 1.0)
 
 func get_tool_force() -> float:
     var chassis_speed := Vector3(velocity.x, 0.0, velocity.z).length()
+    # Crowd force is what the cylinders push with and it needs pressure
+    # behind it. The momentum terms are the arm's own mass in motion and
+    # survive a dead supply, which is why a starved machine can still swing
+    # a bucket into something but cannot lean on it.
     var base_force := (
-        16.0
+        16.0 * supply_pressure_ratio()
         + chassis_speed * 10.0
         + minf(_tool_tip_speed, 15.0) * 5.8
     )
@@ -174,6 +204,24 @@ func _physics_process(delta: float) -> void:
     _resolve_tool_impacts()
     _update_damage_fx()
     _update_telemetry()
+    _publish_hydraulic_demand(delta)
+
+
+## Cylinders swallow oil in proportion to how fast they extend, so the real
+## pose rate is the demand. A parked machine stops competing with the vents
+## for what the pump can move.
+func _publish_hydraulic_demand(delta: float) -> void:
+    var rate := (
+        absf(boom_angle - _demand_boom)
+        + absf(stick_angle - _demand_stick)
+        + absf(tool_angle - _demand_tool)
+        + absf(arm_yaw - _demand_yaw)
+    ) / maxf(delta, 0.001)
+    _demand_boom = boom_angle
+    _demand_stick = stick_angle
+    _demand_tool = tool_angle
+    _demand_yaw = arm_yaw
+    publish_actuator_demand(rate, FULL_ACTUATOR_RATE)
 
 func _player_control(delta: float) -> void:
     if hud == null or camera_rig == null:
@@ -181,6 +229,7 @@ func _player_control(delta: float) -> void:
     var track_ratio := maxf(get_track_ratio(), 0.18)
     var hydraulic_ratio := maxf(get_hydraulic_ratio(), 0.22)
     hydraulic_ratio *= 1.0 - _load_path_resistance * 0.18
+    hydraulic_ratio *= actuator_speed_ratio()
     var axis: Vector2 = hud.move_axis
     var throttle: float = -axis.y
     var steering: float = axis.x
@@ -233,7 +282,7 @@ func _enemy_control(delta: float) -> void:
     var track_ratio := maxf(get_track_ratio(), 0.22)
     velocity.x = forward.x * throttle * drive_speed * 0.48 * track_ratio
     velocity.z = forward.z * throttle * drive_speed * 0.48 * track_ratio
-    var hydro := maxf(get_hydraulic_ratio(), 0.24)
+    var hydro := maxf(get_hydraulic_ratio(), 0.24) * actuator_speed_ratio()
     arm_yaw = sin(ai_time * 0.74) * 0.46 * hydro
     boom_angle = -0.35 + sin(ai_time * 0.88) * 0.18 * hydro
     stick_angle = 0.30 + sin(ai_time * 1.14) * 0.22 * hydro
