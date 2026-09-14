@@ -26,10 +26,10 @@ jobs:
         run: |
           set -euo pipefail
           curl -L --fail --retry 3 \
-            https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_linux.x86_64.zip \
+            https://github.com/godotengine/godot/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip \
             -o /tmp/godot.zip
           unzip -q /tmp/godot.zip -d /tmp
-          GODOT_BIN=/tmp/Godot_v4.3-stable_linux.x86_64
+          GODOT_BIN=/tmp/Godot_v4.7.2-stable_linux.x86_64
           chmod +x "$GODOT_BIN"
           set +e
           "$GODOT_BIN" --headless --path . --editor --quit --audio-driver Dummy 2>&1 | tee /tmp/kinetic-preflight.log
@@ -50,6 +50,12 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          # Default packages input is "tools platform-tools" - the standalone
+          # "tools" package Google removed from the SDK repository, which
+          # makes the action fail before this workflow's own explicit install
+          # step ever runs. Everything actually needed is installed below.
+          packages: ""
 
       - name: Install Android 34 requirements
         shell: bash
@@ -60,8 +66,8 @@ jobs:
       - name: Export Godot Android debug build
         uses: firebelley/godot-export@v8.0.0
         with:
-          godot_executable_download_url: https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_linux.x86_64.zip
-          godot_export_templates_download_url: https://github.com/godotengine/godot/releases/download/4.3-stable/Godot_v4.3-stable_export_templates.tpz
+          godot_executable_download_url: https://github.com/godotengine/godot/releases/download/4.7.2-stable/Godot_v4.7.2-stable_linux.x86_64.zip
+          godot_export_templates_download_url: https://github.com/godotengine/godot/releases/download/4.7.2-stable/Godot_v4.7.2-stable_export_templates.tpz
           relative_project_path: ./
           presets_to_export: Android
           export_debug: true

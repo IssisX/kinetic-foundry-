@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-readonly GODOT_VERSION="4.3-stable"
-readonly GODOT_ARCHIVE="Godot_v4.3-stable_linux.x86_64"
+readonly GODOT_VERSION="4.7.2-stable"
+readonly GODOT_ARCHIVE="Godot_v4.7.2-stable_linux.x86_64"
 readonly GODOT_URL="https://github.com/godotengine/godot/releases/download/${GODOT_VERSION}/${GODOT_ARCHIVE}.zip"
 
 cache_root="${KINETIC_GODOT_HOME:-${XDG_CACHE_HOME:-$PWD/.tools}/kinetic-foundry}"
