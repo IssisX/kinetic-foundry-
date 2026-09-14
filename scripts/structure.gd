@@ -10,9 +10,14 @@ const StructuralDebris = preload(
 const FractureNetwork = preload(
     "res://scripts/fracture_network.gd"
 )
+const PrecisionFractureNetwork = preload(
+    "res://scripts/precision_fracture_network.gd"
+)
 const DeformationSkin = preload(
     "res://scripts/deformation_skin.gd"
 )
+const FoundryMaterial = preload("res://scripts/foundry_material.gd")
+const EnergyPartition = preload("res://scripts/energy_partition.gd")
 
 signal structure_collapsed
 
@@ -44,6 +49,11 @@ var deck_skin
 var _network_damage_bank := 0.0
 var _last_damage_point := Vector3.ZERO
 var _last_damage_direction := Vector3.DOWN
+var _deck_box_mesh: MeshInstance3D
+var _deck_box_collision: CollisionShape3D
+var _deck_height_collision: CollisionShape3D
+var _collider_revision := -1
+var _particle_field: GPUParticlesCollisionHeightField3D
 
 func _ready() -> void:
     add_to_group("structure")
@@ -81,9 +91,12 @@ func _build_frame() -> void:
     deck.collision_mask = 1 | 2 | 4 | 8
     deck.set_meta("structure_frame", self)
     add_child(deck)
-    deck.add_child(GeomUtil.box_mesh(Vector3(9.4, 0.48, 6.0), Color(0.18, 0.19, 0.175), 0.90, 0.24))
-    GeomUtil.add_box_collision(deck, Vector3(9.4, 0.48, 6.0))
-    deck_network = FractureNetwork.new()
+    _deck_box_mesh = GeomUtil.box_mesh(Vector3(9.4, 0.48, 6.0), Color(0.18, 0.19, 0.175), 0.90, 0.24)
+    _deck_box_mesh.name = "AuthoringHull"
+    _deck_box_mesh.visible = false
+    deck.add_child(_deck_box_mesh)
+    _deck_box_collision = GeomUtil.add_box_collision(deck, Vector3(9.4, 0.48, 6.0))
+    deck_network = PrecisionFractureNetwork.new()
     var grid := Fidelity.deck_grid()
     deck_network.configure_grid(
         grid.x,
@@ -115,6 +128,16 @@ func _build_frame() -> void:
             Color(0.24, 0.25, 0.23)
         )
     )
+    _rebuild_deck_collider(true)
+
+    if OS.get_environment("KF_CAPTURE") != "1":
+        _particle_field = GPUParticlesCollisionHeightField3D.new()
+        _particle_field.name = "DeckParticleField"
+        _particle_field.size = Vector3(DECK_SPAN.x, 2.4, DECK_SPAN.z)
+        _particle_field.position = Vector3(0.0, 0.24, 0.0)
+        _particle_field.resolution = 2
+        _particle_field.update_mode = 0
+        deck.add_child(_particle_field)
 
     for x in [-4.15, -2.05, 0.0, 2.05, 4.15]:
         var girder: MeshInstance3D = GeomUtil.box_mesh(Vector3(0.28, 0.58, 6.1), Color(0.29, 0.27, 0.20), 0.82, 0.30)
@@ -255,16 +278,15 @@ func damage_support(
         )
         deck_network.step(1.0 / 60.0)
         MaterialResponse.excite_resonance(deck, DECK_MASS, impact_energy)
+        MaterialResponse.set_resonance_stiffness(
+            deck,
+            deck_network.get_stiffness_ratio()
+        )
+        _release_detached_deck()
+        _rebuild_deck_collider()
+        _transmit_wave_to_supports()
         if deck_skin != null:
-            deck_skin.refresh()
-    var support: StaticBody3D = supports[index]
-    if is_instance_valid(support):
-        support.rotation.z += (
-            direction.x * effective_amount * 0.0009
-        )
-        support.rotation.x -= (
-            direction.z * effective_amount * 0.0009
-        )
+            deck_skin.refresh(true)
     _update_support_material(index)
     if support_health[index] <= 0.0:
         _break_support(index, direction)
@@ -349,12 +371,9 @@ func _apply_pre_failure_pose() -> void:
     ) * 0.18
     var load_sag := overload_ratio * 0.22
     var sag := damage_sag + load_sag
-    var deformation := {}
-    if deck_network != null:
-        deformation = deck_network.get_deformation_state()
-        sag += minf(float(deformation.sag), 0.72)
-        roll += clampf(float(deformation.roll), -0.18, 0.18)
-        pitch += clampf(float(deformation.pitch), -0.16, 0.16)
+    # Support failure still tilts the remaining frame. Network sag is
+    # already in the skin and the heightmap - adding it here made a corner
+    # hit look like the whole plate bowing from its center.
     deck.rotation.x = pitch
     deck.rotation.z = roll
     deck.position.y = 5.05 - sag
@@ -512,8 +531,9 @@ func apply_world_loads(loads: Array, delta: float) -> void:
                     0.0,
                     -body.linear_velocity.y
                 )
-                impact_energy += (
-                    0.5 * body_mass * down_speed * down_speed
+                impact_energy += EnergyPartition.against_world(
+                    body_mass,
+                    down_speed
                 )
             if deck_network != null:
                 var deck_local := deck.to_local(body.global_position)
@@ -580,6 +600,13 @@ func apply_world_loads(loads: Array, delta: float) -> void:
         deck_network.step(delta)
         if deck_skin != null:
             deck_skin.refresh()
+        _release_detached_deck()
+        _rebuild_deck_collider()
+        MaterialResponse.set_resonance_stiffness(
+            deck,
+            deck_network.get_stiffness_ratio()
+        )
+        _transmit_wave_to_supports()
         var deformation: Dictionary = (
             deck_network.get_deformation_state()
         )
@@ -596,17 +623,119 @@ func apply_world_loads(loads: Array, delta: float) -> void:
             )
     _apply_pre_failure_pose()
 
+func _release_detached_deck() -> void:
+    if collapsed or deck_network == null or not is_instance_valid(deck):
+        return
+    if not deck_network.has_method("take_detached_fragments"):
+        return
+    var specs: Array[Dictionary] = deck_network.take_detached_fragments(
+        DECK_THICKNESS,
+        2
+    )
+    if specs.is_empty():
+        return
+    var deck_transform := deck.global_transform
+    var parent := get_parent()
+    if parent == null:
+        parent = self
+    var deck_state := MaterialResponse.state_for(
+        deck,
+        FoundryMaterial.STRUCTURAL_STEEL
+    )
+    for spec in specs:
+        var body := StructuralDebris.new()
+        parent.add_child(body)
+        var local_position := spec.local_position as Vector3
+        body.global_position = deck_transform * local_position
+        body.global_basis = deck_transform.basis
+        body.configure_fragment(
+            spec.hull,
+            DECK_THICKNESS,
+            0,
+            Color(0.27, 0.25, 0.20),
+            maxf(0.1, float(spec.mass)),
+            180.0,
+            "platform"
+        )
+        body.bind_surface_state(
+            MaterialResponse.adopt_fragment(body, deck_state, 0.46)
+        )
+        var world_offset := deck_transform.basis * local_position
+        body.linear_velocity = (
+            deck.linear_velocity
+            + deck_transform.basis * (spec.linear_velocity as Vector3)
+            + deck.angular_velocity.cross(world_offset)
+        )
+        body.angular_velocity = (
+            deck.angular_velocity
+            + deck_transform.basis * (spec.angular_velocity as Vector3)
+        )
+    if deck_skin != null:
+        deck_skin.refresh(true)
+
+
+func _rebuild_deck_collider(force: bool = false) -> void:
+    if deck == null or deck_network == null or not is_instance_valid(deck):
+        return
+    var revision: int = deck_network.get_revision()
+    if not force and revision == _collider_revision:
+        return
+    _collider_revision = revision
+    var grid: Vector2i = deck_network.get_grid_size()
+    var heights: PackedFloat32Array = deck_network.get_height_map_data()
+    if _deck_height_collision == null or not is_instance_valid(_deck_height_collision):
+        _deck_height_collision = GeomUtil.add_heightmap_collision(
+            deck,
+            grid.x,
+            grid.y,
+            heights,
+            DECK_SPAN,
+            0.24
+        )
+    else:
+        var shape := _deck_height_collision.shape as HeightMapShape3D
+        if shape == null or shape.map_width != grid.x or shape.map_depth != grid.y:
+            var replacement := HeightMapShape3D.new()
+            replacement.map_width = grid.x
+            replacement.map_depth = grid.y
+            replacement.map_data = heights
+            _deck_height_collision.shape = replacement
+            var sx := DECK_SPAN.x / maxf(float(grid.x - 1), 1.0)
+            var sz := DECK_SPAN.z / maxf(float(grid.y - 1), 1.0)
+            _deck_height_collision.scale = Vector3(sx, 1.0, sz)
+        else:
+            shape.map_data = heights
+    var deformed := revision > 1
+    if _deck_box_collision != null and is_instance_valid(_deck_box_collision):
+        _deck_box_collision.disabled = deformed
+    if _deck_height_collision != null and is_instance_valid(_deck_height_collision):
+        _deck_height_collision.disabled = false
+
+
 func get_load_path_state() -> Dictionary:
     var deformation := {}
+    var stiffness := 1.0
+    var wave_peak := 0.0
     if deck_network != null:
         deformation = deck_network.get_deformation_state()
+        stiffness = float(deformation.get(
+            "stiffness_ratio",
+            deck_network.get_stiffness_ratio()
+        ))
+        wave_peak = float(deformation.get("wave_peak", 0.0))
     return {
         "live_load_mass": live_load_mass,
         "overload_ratio": overload_ratio,
         "fatigue": fatigue,
         "deformation": deformation,
+        "stiffness_ratio": stiffness,
+        "wave_peak": wave_peak,
         "collapsed": collapsed
     }
+
+
+func _transmit_wave_to_supports() -> void:
+    pass
 
 func _load_profile(body: Node) -> Dictionary:
     if body.has_method("get_load_profile"):

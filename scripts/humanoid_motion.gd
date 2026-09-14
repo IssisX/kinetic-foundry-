@@ -1,6 +1,5 @@
 extends "res://scripts/humanoid_rig.gd"
 
-const OrganicMesh = preload("res://scripts/organic_mesh.gd")
 const GaitDebug = preload("res://scripts/humanoid_gait_debug.gd")
 
 signal foot_planted(
@@ -21,12 +20,13 @@ const SHIN_LEN := 0.44
 const LEG_LEN := THIGH_LEN + SHIN_LEN
 const ANKLE_TO_SOLE := 0.125
 const FOOT_HALF_LENGTH := 0.21
-const STEP_WIDTH := 0.09
+const STEP_WIDTH := 0.26
 const BASE_PELVIS_HEIGHT := 0.94
 const GRAVITY := 9.81
 const V_COMFORT := 0.45 * sqrt(GRAVITY * LEG_LEN)
 const V_RUN := 0.75 * sqrt(GRAVITY * LEG_LEN)
-const GROUND_MASK := 2 | 8
+const GROUND_MASK := 1 | 2 | 8
+const TORSO_REST_Y := 0.12
 
 class FootState:
     var side := 0.0
@@ -84,100 +84,12 @@ var _max_ground_error := 0.0
 
 func _build() -> void:
     super()
-    _add_organic_mass()
     if player_style:
         _debug = GaitDebug.new()
         add_child(_debug)
         _debug.visible = (
             OS.get_environment("KF_GAIT_DEBUG") == "1"
         )
-
-func _add_organic_mass() -> void:
-    if pelvis == null or torso == null:
-        return
-
-    var cloth := (
-        Color(0.15, 0.18, 0.175)
-        if player_style
-        else Color(0.22, 0.255, 0.23)
-    )
-    var dark := Color(0.055, 0.065, 0.062)
-
-    var pelvis_shell := OrganicMesh.loft_node([
-        Vector3(-0.18, 0.22, 0.16),
-        Vector3(-0.06, 0.31, 0.22),
-        Vector3(0.12, 0.33, 0.23),
-        Vector3(0.24, 0.28, 0.20)
-    ], dark, 16, 0.86)
-    pelvis_shell.position = Vector3(0.0, 0.02, 0.0)
-    pelvis_shell.scale.x = 1.08 if player_style else 1.0
-    pelvis.add_child(pelvis_shell)
-
-    var torso_shell := OrganicMesh.loft_node([
-        Vector3(-0.10, 0.27, 0.20),
-        Vector3(0.06, 0.31, 0.22),
-        Vector3(0.30, 0.39, 0.245),
-        Vector3(0.56, 0.44, 0.255),
-        Vector3(0.72, 0.41, 0.24),
-        Vector3(0.82, 0.30, 0.20)
-    ], cloth, 18, 0.74)
-    torso_shell.position = Vector3(0.0, -0.01, 0.015)
-    torso_shell.scale.x = 1.07 if player_style else 1.0
-    torso.add_child(torso_shell)
-
-    _add_limb_shell(
-        leg_l,
-        Vector3(-0.39, 0.16, 0.14),
-        Vector3(-0.05, 0.145, 0.125),
-        cloth,
-        13
-    )
-    _add_limb_shell(
-        leg_r,
-        Vector3(-0.39, 0.16, 0.14),
-        Vector3(-0.05, 0.145, 0.125),
-        cloth,
-        13
-    )
-    _add_limb_shell(
-        arm_l,
-        Vector3(-0.49, 0.125, 0.112),
-        Vector3(-0.03, 0.145, 0.13),
-        cloth,
-        12
-    )
-    _add_limb_shell(
-        arm_r,
-        Vector3(-0.49, 0.125, 0.112),
-        Vector3(-0.03, 0.145, 0.13),
-        cloth,
-        12
-    )
-
-func _add_limb_shell(
-        parent: Node3D,
-        bottom: Vector3,
-        top: Vector3,
-        color: Color,
-        segments: int
-) -> void:
-    if parent == null:
-        return
-    var shell := OrganicMesh.loft_node([
-        bottom,
-        Vector3(
-            lerpf(bottom.x, top.x, 0.34),
-            bottom.y * 1.03,
-            bottom.z * 1.03
-        ),
-        Vector3(
-            lerpf(bottom.x, top.x, 0.68),
-            top.y * 1.04,
-            top.z * 1.04
-        ),
-        top
-    ], color, segments, 0.78)
-    parent.add_child(shell)
 
 func animate(
         delta: float,
@@ -214,6 +126,8 @@ func animate(
         torso.rotation.z += attack_side * hit_amount * 0.16
         head_root.rotation.x = hit_amount * 0.22
 
+    _apply_crush(delta)
+    _express()
     _apply_death(delta, dead)
     _update_diagnostics(delta)
 
@@ -349,7 +263,8 @@ func _update_governor(speed: float) -> void:
             0.32,
             _last_walk_speed * stop_falloff
         )
-    _governed_speed = minf(requested, V_RUN * 0.99)
+    var limp := maxf(limp_l, limp_r)
+    _governed_speed = minf(requested, V_RUN * 0.99) * (1.0 - limp * 0.32)
     _last_walk_speed = maxf(_governed_speed, 0.32)
     var u := clampf(
         _governed_speed / V_COMFORT,
@@ -409,6 +324,8 @@ func _begin_swing(state: FootState) -> void:
         (1.0 - _stance_fraction)
         / maxf(_phase_rate, 0.01)
     )
+    var foot_limp := limp_l if state.side < 0.0 else limp_r
+    state.swing_duration *= 1.0 + foot_limp * 0.45
 
     var forward := _movement_forward()
     var right := root.global_basis.x.normalized()
@@ -422,6 +339,7 @@ func _begin_swing(state: FootState) -> void:
             0.22,
             0.55
         )
+    step_scale *= 1.0 - foot_limp * 0.40
 
     var ahead := (
         forward * _step_length * 0.52 * step_scale
@@ -538,6 +456,7 @@ func _swing_ankle(
         state.target_normal,
         h
     ).normalized()
+    var foot_limp := limp_l if state.side < 0.0 else limp_r
     var clearance := (
         0.015
         + 0.040
@@ -546,7 +465,7 @@ func _swing_ankle(
             0.0,
             1.0
         )
-    )
+    ) * (1.0 - foot_limp * 0.55)
     contact += (
         normal * clearance
         * 4.0 * swing_t * (1.0 - swing_t)
@@ -658,9 +577,9 @@ func _pose_pelvis(delta: float, speed: float) -> void:
     ) * 0.20
 
     var idle_sway := sin(_idle_time * 1.55) * 0.008
-    var lateral := wave * 0.024 * _motion_blend
+    var lateral := wave * 0.042 * _motion_blend
     var bob := (
-        vertical * 0.020 * LEG_LEN * _motion_blend
+        vertical * 0.028 * LEG_LEN * _motion_blend
     )
     pelvis.position.x = (
         lateral
@@ -683,16 +602,13 @@ func _pose_pelvis(delta: float, speed: float) -> void:
         pelvis.position.x -= 0.018 * apa
         pelvis.position.z += 0.022 * apa
 
-    var pelvis_yaw := (
-        deg_to_rad(4.0) * wave * _motion_blend
-    )
-    var pelvis_list := (
-        deg_to_rad(-4.5) * wave * _motion_blend
-    )
+    var pelvis_yaw := deg_to_rad(11.0) * wave * _motion_blend
+    var pelvis_list := deg_to_rad(-8.0) * wave * _motion_blend
+    var limp_bias := (limp_r - limp_l) * deg_to_rad(7.0)
     pelvis.rotation = Vector3(
-        slope_pitch,
+        slope_pitch - deg_to_rad(4.0) * _motion_blend,
         pelvis_yaw,
-        pelvis_list + slope_roll
+        pelvis_list + slope_roll + limp_bias
     )
     _com_world = pelvis.global_position + Vector3.UP * 0.09
     _support_world = _support_center()
@@ -727,11 +643,7 @@ func _solve_leg(
         0.0
     ))
     var forward := _movement_forward()
-    var pole := (
-        hip_position
-        + forward * 0.45
-        + Vector3.UP * 0.10
-    )
+    var pole := hip_position + forward * 0.55 + Vector3.UP * 0.08
     var pole_vector := pole - hip_position
     var perpendicular := (
         pole_vector
@@ -740,6 +652,8 @@ func _solve_leg(
     if perpendicular.length_squared() < 0.001:
         perpendicular = forward
     perpendicular = perpendicular.normalized()
+    if perpendicular.dot(forward) < 0.0:
+        perpendicular = -perpendicular
     var knee_position := (
         hip_position
         + direction * along
@@ -827,7 +741,12 @@ func _bone_basis(
     if x_axis.length_squared() < 0.001:
         x_axis = forward_hint.cross(y_axis)
     x_axis = x_axis.normalized()
+    if x_axis.dot(right_hint) < 0.0:
+        x_axis = -x_axis
     var z_axis := x_axis.cross(y_axis).normalized()
+    if z_axis.dot(-forward_hint) < 0.0:
+        z_axis = -z_axis
+        x_axis = -x_axis
     return Basis(x_axis, y_axis, z_axis).orthonormalized()
 
 func _pose_upper_body(speed: float) -> void:
@@ -837,22 +756,23 @@ func _pose_upper_body(speed: float) -> void:
         1.4
     )
     var leg_wave := cos(TAU * _phase)
+    var limp := maxf(limp_l, limp_r)
     var arm_amplitude := deg_to_rad(
         lerpf(
-            7.0,
-            31.0,
+            8.0,
+            36.0,
             clampf(speed_scale, 0.0, 1.0)
         )
-    ) * _motion_blend
+    ) * _motion_blend * (1.0 - limp * 0.35)
     arm_l.rotation = Vector3(
-        arm_amplitude * leg_wave,
+        arm_amplitude * leg_wave * (1.0 - limp_l * 0.55),
         0.0,
-        -0.035 * _motion_blend
+        -0.06 * _motion_blend
     )
     arm_r.rotation = Vector3(
-        -arm_amplitude * leg_wave,
+        -arm_amplitude * leg_wave * (1.0 - limp_r * 0.55),
         0.0,
-        0.035 * _motion_blend
+        0.06 * _motion_blend
     )
     var elbow_flex := deg_to_rad(
         lerpf(
@@ -864,22 +784,25 @@ func _pose_upper_body(speed: float) -> void:
     elbow_l.rotation.x = -elbow_flex
     elbow_r.rotation.x = -elbow_flex
 
-    var thorax_yaw := -pelvis.rotation.y * 0.72
     var breath := (
         sin(_idle_time * TAU * 0.22) * 0.010
     )
-    torso.position.y = (
-        0.24 + breath * (1.0 - _motion_blend)
-    )
+    if spine != null:
+        spine.rotation = Vector3(
+            -0.05 * speed_scale * _motion_blend,
+            -pelvis.rotation.y * 0.48,
+            -pelvis.rotation.z * 0.32
+        )
+    torso.position.y = TORSO_REST_Y + breath * (1.0 - _motion_blend)
     torso.rotation = Vector3(
-        -0.018 * speed_scale * _motion_blend,
-        thorax_yaw,
-        -pelvis.rotation.z * 0.34
+        -0.07 * speed_scale * _motion_blend,
+        -pelvis.rotation.y * 1.08,
+        -pelvis.rotation.z * 0.58
     )
     head_root.rotation = Vector3(
-        0.012 * speed_scale,
-        -torso.rotation.y * 0.55,
-        -torso.rotation.z * 0.42
+        0.04 * speed_scale,
+        -torso.rotation.y * 0.45,
+        -torso.rotation.z * 0.35
     )
 
 func _animate_run(
@@ -920,9 +843,9 @@ func _animate_run(
         0.0
     )
     pelvis.rotation = Vector3(
-        -0.07,
-        -wave * 0.045,
-        -wave * 0.025
+        -0.10,
+        -wave * 0.10,
+        -wave * 0.06
     )
     arm_l.rotation = Vector3(
         -stride * 0.88,
@@ -936,8 +859,10 @@ func _animate_run(
     )
     elbow_l.rotation.x = -0.62
     elbow_r.rotation.x = -0.62
-    torso.position.y = 0.24
-    torso.rotation = Vector3(-0.10, wave * 0.07, 0.0)
+    if spine != null:
+        spine.rotation = Vector3(-0.06, -wave * 0.06, wave * 0.03)
+    torso.position.y = TORSO_REST_Y
+    torso.rotation = Vector3(-0.12, wave * 0.12, -wave * 0.04)
     head_root.rotation = Vector3(
         0.04,
         -torso.rotation.y * 0.45,

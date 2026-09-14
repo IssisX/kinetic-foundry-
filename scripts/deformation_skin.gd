@@ -77,6 +77,9 @@ func configure(
         BaseMaterial3D.SHADING_MODE_UNSHADED
     )
     _cracks.material_override = _crack_material
+    if not GameOptions.changed.is_connected(_on_view_law_changed):
+        GameOptions.changed.connect(_on_view_law_changed)
+    _push_option_uniforms()
     refresh(true)
 
 
@@ -95,13 +98,33 @@ func bind_resonance_source(body: Object) -> void:
     resonance_source = body
 
 
+func _on_view_law_changed() -> void:
+    _push_option_uniforms()
+    if _cracks != null:
+        _cracks.visible = GameOptions.damage_visible
+
+
+func _push_option_uniforms() -> void:
+    if _surface_material == null:
+        return
+    _surface_material.set_shader_parameter("stress_overlay", GameOptions.stress_amount())
+    _surface_material.set_shader_parameter("deform_scale", GameOptions.deform_scale())
+    _surface_material.set_shader_parameter("damage_overlay", GameOptions.damage_amount())
+    if _cracks != null:
+        _cracks.visible = GameOptions.damage_visible
+
+
 func refresh(force: bool = false) -> void:
     if network == null or _surface == null:
         return
     _push_surface_uniforms()
     _push_resonance_uniform()
+    _push_option_uniforms()
     var revision: int = network.get_revision()
-    if not force and revision == _seen_revision:
+    var wave_live := false
+    if network.has_method("get_wave_peak"):
+        wave_live = float(network.get_wave_peak()) > 0.03
+    if not force and revision == _seen_revision and not wave_live:
         return
     _seen_revision = revision
     _rebuild_surface()
@@ -112,12 +135,36 @@ func refresh(force: bool = false) -> void:
 ## frame with no new damage/exposure event, so it cannot wait on the
 ## surface_state revision guard the way paint/oxidation can.
 func _push_resonance_uniform() -> void:
-    if resonance_source == null or _surface_material == null:
+    if _surface_material == null:
         return
-    _surface_material.set_shader_parameter(
-        "shimmer_m",
-        MaterialResponse.resonance_shimmer(resonance_source)
-    )
+    if resonance_source != null:
+        _surface_material.set_shader_parameter(
+            "shimmer_m",
+            MaterialResponse.resonance_shimmer(resonance_source)
+        )
+    if network == null:
+        return
+    var impact_point := Vector3.ZERO
+    var impact_radius := 0.0
+    if network.has_method("get_last_impact_point"):
+        impact_point = _map_position(network.get_last_impact_point())
+    if network.has_method("get_last_impact_radius"):
+        impact_radius = float(network.get_last_impact_radius())
+    var depth := 0.0
+    if impact_radius > 0.001:
+        depth = clampf(impact_radius * 0.045, 0.01, 0.16)
+    _surface_material.set_shader_parameter("impact_local", impact_point)
+    _surface_material.set_shader_parameter("impact_radius", impact_radius)
+    _surface_material.set_shader_parameter("impact_depth", depth)
+
+
+func _any_retired(indices: Array) -> bool:
+    if network == null or not network.has_method("is_retired"):
+        return false
+    for index in indices:
+        if network.is_retired(int(index)):
+            return true
+    return false
 
 
 func _push_surface_uniforms() -> void:
@@ -157,9 +204,19 @@ func _rebuild_surface() -> void:
                 clampf(network.get_node_load(index), 0.0, 1.0),
                 clampf(network.get_node_oxidation(index), 0.0, 1.0)
             ))
+            # UV is otherwise unused by this shader (the lattice's own solved
+            # positions are the geometry, nothing samples a texture with it),
+            # so its y channel carries the stress-wave scalar rather than
+            # contesting COLOR.a, which oxidation already owns.
             uvs.append(Vector2(
                 float(column) / float(grid.x - 1),
-                float(row) / float(grid.y - 1)
+                clampf(
+                    network.get_node_wave(index)
+                    if network.has_method("get_node_wave")
+                    else 0.0,
+                    0.0,
+                    1.0
+                )
             ))
             normals.append(Vector3.ZERO)
 
@@ -170,6 +227,8 @@ func _rebuild_surface() -> void:
             var right := first + 1
             var down := first + grid.x
             var diagonal := down + 1
+            if _any_retired([first, down, right, diagonal]):
+                continue
             _append_triangle(
                 indices,
                 normals,
@@ -186,6 +245,9 @@ func _rebuild_surface() -> void:
                 down,
                 diagonal
             )
+    if indices.is_empty():
+        _surface.mesh = null
+        return
     var packed_normals := PackedVector3Array()
     for normal in normals:
         packed_normals.append(

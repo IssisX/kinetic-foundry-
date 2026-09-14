@@ -32,7 +32,7 @@ func _remove_cramped_perimeter() -> void:
             node.queue_free()
 
 func _build_expanded_floor() -> void:
-    GeomUtil.static_box(self, "ExpandedFoundryFloor", Vector3(0.0, -0.56, 1.0), Vector3(124.0, 1.10, 112.0), Color(0.105, 0.112, 0.108))
+    GeomUtil.static_box(self, "ExpandedFoundryFloor", Vector3(0.0, -0.56, 1.0), Vector3(124.0, 1.10, 112.0), Color(0.158, 0.150, 0.140))
 
     for lane in [-28.0, 28.0]:
         for z_i in 18:

@@ -2,6 +2,7 @@ extends Node3D
 
 const GeomUtil = preload("res://scripts/geom.gd")
 const PhysicsPropScript = preload("res://scripts/physics_prop.gd")
+const YardSubstrateScript = preload("res://scripts/yard_substrate.gd")
 
 func _ready() -> void:
     _build_ground()
@@ -23,8 +24,16 @@ func _build_ground() -> void:
         "Ground",
         Vector3(0.0, -0.50, 0.0),
         Vector3(72.0, 1.0, 72.0),
-        Color(0.078, 0.084, 0.082)
+        Color(0.168, 0.160, 0.148)
     )
+    var earth := YardSubstrateScript.new()
+    earth.name = "YardSubstrate"
+    add_child(earth)
+    earth.cut_and_pile(Vector3(12.4, 0.0, 7.2), Vector3(0.18, 0.0, -1.0), 210.0, 2.8)
+    earth.cut_and_pile(Vector3(11.6, 0.0, 6.1), Vector3(0.28, 0.0, -1.0), 160.0, 2.2)
+    earth.cut_and_pile(Vector3(13.1, 0.0, 5.4), Vector3(0.10, 0.0, -1.0), 120.0, 1.8)
+    earth.cut_and_pile(Vector3(-2.2, 0.0, 3.8), Vector3(1.0, 0.0, 0.15), 90.0, 1.6)
+    earth.rebuild()
     for i in 9:
         var patch := GeomUtil.box_mesh(
             Vector3(4.5 + float(i % 3), 0.012, 2.2 + float(i % 4) * 0.6),
@@ -102,8 +111,9 @@ func _build_warehouse() -> void:
         var bay_light := OmniLight3D.new()
         bay_light.position = Vector3(x, 5.3, -22.9)
         bay_light.light_color = Color(1.0, 0.66, 0.30)
-        bay_light.light_energy = 2.1
-        bay_light.omni_range = 7.0
+        bay_light.light_energy = 0.85
+        bay_light.omni_range = 6.2
+        bay_light.shadow_enabled = false
         add_child(bay_light)
 
     for window_i in 6:
@@ -382,11 +392,46 @@ func _build_loose_props() -> void:
     _spawn_barrel(Vector3(-2.2, 0.60, -9.8), Color(0.34, 0.30, 0.12))
     _spawn_barrel(Vector3(9.0, 0.60, 4.5), Color(0.42, 0.18, 0.06))
     _spawn_barrel(Vector3(9.8, 0.60, 5.0), Color(0.16, 0.30, 0.31))
+    _spawn_barrel(Vector3(15.1, 0.60, 5.35), Color(0.42, 0.18, 0.06))
+    _spawn_barrel(Vector3(16.0, 0.60, 5.70), Color(0.16, 0.30, 0.31))
+    _spawn_barrel(Vector3(14.55, 0.60, 5.90), Color(0.34, 0.30, 0.12))
+    _spawn_barrel(Vector3(15.55, 0.60, 4.85), Color(0.20, 0.22, 0.21))
 
     _spawn_box_prop(Vector3(-10.5, 0.55, 5.0), Vector3(1.1, 1.1, 1.1), Color(0.25, 0.19, 0.10), 55.0)
     _spawn_box_prop(Vector3(-9.1, 0.42, 5.2), Vector3(0.84, 0.84, 0.84), Color(0.23, 0.17, 0.09), 38.0)
     _spawn_box_prop(Vector3(6.5, 0.38, 11.5), Vector3(2.8, 0.30, 0.32), Color(0.24, 0.25, 0.23), 88.0)
     _spawn_box_prop(Vector3(6.6, 0.72, 11.1), Vector3(2.6, 0.30, 0.32), Color(0.24, 0.25, 0.23), 88.0)
+    # Steel the excavator can actually pick up and use as a tool.
+    _spawn_box_prop(
+        Vector3(8.4, 0.22, -8.4),
+        Vector3(5.6, 0.30, 0.38),
+        Color(0.30, 0.31, 0.29),
+        420.0
+    )
+    _spawn_box_prop(
+        Vector3(8.6, 0.54, -8.85),
+        Vector3(5.2, 0.30, 0.38),
+        Color(0.28, 0.29, 0.27),
+        390.0
+    )
+    _spawn_box_prop(
+        Vector3(-7.2, 0.20, 2.4),
+        Vector3(1.85, 0.22, 1.25),
+        Color(0.22, 0.23, 0.22),
+        310.0
+    )
+    _spawn_box_prop(
+        Vector3(15.7, 0.38, 4.55),
+        Vector3(1.55, 0.42, 0.95),
+        Color(0.24, 0.25, 0.23),
+        140.0
+    )
+    _spawn_box_prop(
+        Vector3(14.6, 0.28, 4.15),
+        Vector3(1.85, 0.28, 1.05),
+        Color(0.22, 0.23, 0.21),
+        175.0
+    )
 
 func _spawn_barrel(pos: Vector3, color: Color) -> void:
     var prop := PhysicsPropScript.new()
@@ -398,14 +443,24 @@ func _spawn_box_prop(pos: Vector3, size: Vector3, color: Color, mass_value: floa
     var prop := PhysicsPropScript.new()
     prop.position = pos
     add_child(prop)
-    prop.configure_box(size, color, mass_value, 72.0)
+    prop.configure_box(size, color, mass_value, maxf(72.0, mass_value * 1.85))
 
 func _build_work_lights() -> void:
-    _yard_light(Vector3(-14.0, 7.3, 4.0), Color(1.0, 0.60, 0.25), 4.2, 17.0)
-    _yard_light(Vector3(3.0, 8.2, -7.0), Color(1.0, 0.69, 0.32), 4.7, 19.0)
-    _yard_light(Vector3(17.0, 7.0, 10.0), Color(0.50, 0.68, 0.75), 3.4, 14.0)
+    _yard_light(Vector3(-14.0, 7.3, 4.0), Color(1.0, 0.62, 0.28), 6.2, 20.0, true)
+    _yard_light(Vector3(3.0, 8.2, -7.0), Color(1.0, 0.70, 0.34), 7.0, 22.0, true)
+    _yard_light(Vector3(17.0, 7.0, 10.0), Color(0.62, 0.74, 0.82), 3.8, 15.0, false)
+    GeomUtil.work_spot(
+        self,
+        Vector3(0.0, 11.4, -23.2),
+        Vector3(2.0, 0.2, -4.0),
+        Color(1.0, 0.68, 0.36),
+        8.5,
+        30.0,
+        42.0,
+        true
+    )
 
-func _yard_light(pos: Vector3, color: Color, energy: float, range_value: float) -> void:
+func _yard_light(pos: Vector3, color: Color, energy: float, range_value: float, cast_shadow: bool = false) -> void:
     var pole := GeomUtil.cylinder_mesh(
         0.11,
         pos.y,
@@ -421,13 +476,8 @@ func _yard_light(pos: Vector3, color: Color, energy: float, range_value: float) 
         0.42,
         0.14
     )
-    head.material_override = GeomUtil.emissive_material(color * 0.75, 1.8, 0.35, 0.10)
+    head.material_override = GeomUtil.emissive_material(color * 0.75, 2.4, 0.35, 0.10)
     head.position = pos
     add_child(head)
-    var light := OmniLight3D.new()
-    light.position = pos + Vector3(0.0, -0.18, 0.0)
-    light.light_color = color
-    light.light_energy = energy
-    light.omni_range = range_value
-    light.shadow_enabled = false
-    add_child(light)
+    var aim := Vector3(pos.x * 0.28, 0.12, pos.z * 0.28)
+    GeomUtil.work_spot(self, pos + Vector3(0.0, -0.14, 0.0), aim, color, energy, range_value, 50.0, cast_shadow)

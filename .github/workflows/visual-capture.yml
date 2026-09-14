@@ -2,7 +2,7 @@ name: Kinetic Foundry Visual Capture
 
 on:
   push:
-    branches: [main]
+    branches: [main, Grok]
     paths:
       - ".capture-request"
       - ".github/workflows/visual-capture.yml"
@@ -15,7 +15,7 @@ jobs:
   capture:
     if: ${{ !contains(github.event.head_commit.message, '[skip capture]') }}
     runs-on: ubuntu-latest
-    timeout-minutes: 3
+    timeout-minutes: 5
     name: Render deterministic screenshots
 
     env:
@@ -44,14 +44,22 @@ jobs:
         run: |
           set -euo pipefail
           set +e
-          xvfb-run -a -s "-screen 0 1800x1500x24" \
-            "$GODOT_BIN" --path . --editor --quit --audio-driver Dummy 2>&1 | tee /tmp/kinetic-import.log
+          "$GODOT_BIN" --headless --path . --import --quit --audio-driver Dummy 2>&1 | tee /tmp/kinetic-import.log
           status=${PIPESTATUS[0]}
           set -e
           test "$status" -eq 0
           if grep -qE 'SCRIPT ERROR:|Failed to load script|Failed to create an autoload|Failed to instantiate an autoload' /tmp/kinetic-import.log; then
             echo "GODOT_IMPORT_SCRIPT_FAILURE"
             grep -E 'SCRIPT ERROR:|Failed to load script|Failed to create an autoload|Failed to instantiate an autoload' /tmp/kinetic-import.log
+            exit 21
+          fi
+          if [ ! -f .godot/global_script_class_cache.cfg ]; then
+            echo "MISSING_GLOBAL_CLASS_CACHE"
+            exit 21
+          fi
+          if ! grep -q FoundryMaterial .godot/global_script_class_cache.cfg; then
+            echo "GLOBAL_CLASS_CACHE_MISSING_FOUNDRY_MATERIAL"
+            cat .godot/global_script_class_cache.cfg
             exit 21
           fi
 
@@ -62,7 +70,7 @@ jobs:
           rm -rf "$CAPTURE_DIR"
           mkdir -p "$CAPTURE_DIR"
           set +e
-          timeout --signal=TERM 58s xvfb-run -a -s "-screen 0 1800x1500x24" \
+          timeout --signal=TERM 90s xvfb-run -a -s "-screen 0 1800x1500x24" \
             "$GODOT_BIN" --path . --audio-driver Dummy 2>&1 | tee /tmp/kinetic-capture.log
           status=${PIPESTATUS[0]}
           set -e
@@ -89,6 +97,8 @@ jobs:
             06_breached_route.png
             07_walk_single_support.png
             08_walk_double_support.png
+            09_crane_suspended_load.png
+            10_dozer_blade_push.png
           )
           for name in "${expected[@]}"; do
             file="$CAPTURE_DIR/$name"
@@ -114,4 +124,4 @@ jobs:
           git add -A captures/latest
           if git diff --cached --quiet; then exit 0; fi
           git commit -m "[skip capture] Update Kinetic Foundry visual captures"
-          git push origin HEAD:main
+          git push origin HEAD:${{ github.ref_name }}

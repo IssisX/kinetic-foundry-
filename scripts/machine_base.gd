@@ -1,6 +1,9 @@
 class_name FoundryMachine
 extends CharacterBody3D
 
+const FoundryMaterial = preload("res://scripts/foundry_material.gd")
+const EnergyPartition = preload("res://scripts/energy_partition.gd")
+
 ## What every heavy machine in the yard shares.
 ##
 ## Occupancy, hijacking, damage, and holding a load are not excavator
@@ -8,6 +11,10 @@ extends CharacterBody3D
 ## brings new verbs and new geometry, and inherits the rest, so that a
 ## second machine cannot quietly grow a second damage model or a second way
 ## of holding a load.
+
+## A rigid body below this mass is scrap the working assembly can sweep.
+## At or above it, the arm/load has to stop and spend energy.
+const HARD_CONTACT_MASS := 85.0
 
 signal player_entered(machine)
 signal player_exited(machine)
@@ -34,6 +41,10 @@ var _grip := MachineGrip.new()
 var _hijack_candidate: Node3D
 var _hijack_timeout := 0.0
 var _supply_demand := 0.0
+var work_anchor := Vector3.ZERO
+var work_heading := 0.0
+var _work_sign := 1.0
+var _floor_exclude: Array[RID] = []
 
 
 func _ready() -> void:
@@ -44,6 +55,25 @@ func _ready() -> void:
     var supply := process_supply_id()
     if supply != "":
         ProcessPlant.bind_machine(self, supply)
+    call_deferred("_lock_work_station")
+
+
+func _lock_work_station() -> void:
+    work_anchor = global_position
+    work_heading = rotation.y
+    _collect_floor_rids()
+
+
+func _collect_floor_rids() -> void:
+    _floor_exclude.clear()
+    if not is_inside_tree():
+        return
+    for node in get_tree().get_nodes_in_group("yard_substrate"):
+        if node is CollisionObject3D:
+            _floor_exclude.append((node as CollisionObject3D).get_rid())
+    var ground := get_tree().root.find_child("Ground", true, false)
+    if ground is CollisionObject3D:
+        _floor_exclude.append((ground as CollisionObject3D).get_rid())
 
 
 func configure(controls, camera) -> void:
@@ -97,6 +127,26 @@ func publish_actuator_demand(pose_rate: float, reference_rate: float) -> void:
     ProcessPlant.request_machine_supply(self, _supply_demand)
 
 
+## Locomotion stick. Touch owns the HUD axis; keyboard fills in when
+## the stick is idle so a desktop session can still drive. A is left,
+## D is right: yaw += -axis.x, forward is -Z.
+func control_axis() -> Vector2:
+    var axis := Vector2.ZERO
+    if hud != null:
+        axis = hud.move_axis
+    if axis.length_squared() < 0.002:
+        if Input.is_physical_key_pressed(KEY_D) or Input.is_physical_key_pressed(KEY_RIGHT):
+            axis.x += 1.0
+        if Input.is_physical_key_pressed(KEY_A) or Input.is_physical_key_pressed(KEY_LEFT):
+            axis.x -= 1.0
+        if Input.is_physical_key_pressed(KEY_W) or Input.is_physical_key_pressed(KEY_UP):
+            axis.y -= 1.0
+        if Input.is_physical_key_pressed(KEY_S) or Input.is_physical_key_pressed(KEY_DOWN):
+            axis.y += 1.0
+        axis = axis.limit_length(1.0)
+    return axis
+
+
 ## Readable name for prompts and machine telemetry.
 func machine_name() -> String:
     return "MACHINE"
@@ -132,6 +182,33 @@ func get_health_ratio() -> float:
 
 func is_holding_load() -> bool:
     return held_load != null and is_instance_valid(held_load)
+
+
+func load_mass() -> float:
+    if not is_holding_load():
+        return 0.0
+    return maxf(float(held_load.get("mass")), 0.0)
+
+
+func struck_mass(body: Node) -> float:
+    if body == null:
+        return 900.0
+    if body is RigidBody3D:
+        return maxf((body as RigidBody3D).mass, 1.0)
+    var value = body.get("mass")
+    if value != null:
+        return maxf(float(value), 1.0)
+    return 900.0
+
+
+func is_hard_world_contact(collider: Node) -> bool:
+    if collider == null or collider == self:
+        return false
+    if is_holding_load() and collider == held_load:
+        return false
+    if collider is RigidBody3D and not (collider as RigidBody3D).freeze:
+        return (collider as RigidBody3D).mass >= HARD_CONTACT_MASS
+    return true
 
 
 func request_hijack(player: Node3D) -> bool:
@@ -261,3 +338,36 @@ func _tick_hijack(delta: float) -> void:
 func _release_load(_with_throw: bool) -> void:
     _grip.release(Vector3.ZERO, false)
     held_load = null
+
+
+## The yard floor is a load the working assembly can spend energy on.
+func work_ground(
+        world_point: Vector3,
+        direction: Vector3,
+        intensity: float,
+        width: float = 1.6
+) -> void:
+    if not is_inside_tree() or intensity < 0.5:
+        return
+    var nodes := get_tree().get_nodes_in_group("yard_substrate")
+    if nodes.is_empty():
+        return
+    var ground: Node = nodes[0]
+    if ground.has_method("cut_and_pile"):
+        ground.cut_and_pile(world_point, direction, intensity, width)
+
+
+func work_gouge(
+        world_point: Vector3,
+        direction: Vector3,
+        intensity: float
+) -> void:
+    if not is_inside_tree() or intensity < 0.5:
+        return
+    var nodes := get_tree().get_nodes_in_group("yard_substrate")
+    if nodes.is_empty():
+        return
+    var ground: Node = nodes[0]
+    if ground.has_method("gouge"):
+        ground.gouge(world_point, direction, intensity)
+

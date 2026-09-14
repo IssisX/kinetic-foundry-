@@ -7,6 +7,8 @@ extends RefCounted
 ## topology, fragment mass, and release velocity. Gameplay and rendering
 ## consume this state; neither invents a second destruction result.
 
+const EnergyPartition = preload("res://scripts/energy_partition.gd")
+
 signal topology_changed(component_count: int)
 
 ## Maps authored spring stiffness into an XPBD compliance.
@@ -81,6 +83,17 @@ var _fracture_finalized := false
 var _last_impact_point := Vector3.ZERO
 var _last_impact_direction := Vector3.UP
 var _last_substep_delta := 0.016
+var _last_impact_radius := 0.0
+var _retired: Array[bool] = []
+var _wave: Array[float] = []
+var _crack_fronts: Array[Dictionary] = []
+var _crack_budget := 0.0
+
+## Instant crush at the contact. The rest of the fracture share is spent by
+## crack fronts as the elastic wave arrives, not sprayed across the plate.
+const CORE_FRACTURE_SHARE := 0.14
+const WAVE_DECAY_PER_SECOND := 7.5
+const MAX_CRACK_FRONTS := 8
 
 
 func configure_grid(
@@ -121,6 +134,10 @@ func configure_grid(
     _forces.clear()
     _previous_positions.clear()
     _pinned.clear()
+    _retired.clear()
+    _wave.clear()
+    _crack_fronts.clear()
+    _crack_budget = 0.0
     _bonds.clear()
     _wetness.clear()
     _oxidation.clear()
@@ -148,6 +165,8 @@ func configure_grid(
             _pinned.append(_is_pinned(column, row))
             _wetness.append(0.0)
             _oxidation.append(0.0)
+            _retired.append(false)
+            _wave.append(0.0)
 
     for row in rows:
         for column in columns:
@@ -230,17 +249,30 @@ func _add_bond(
 func apply_force(local_point: Vector3, force: Vector3) -> void:
     if _positions.is_empty() or force.length_squared() < 0.0001:
         return
-    var nearest := _nearest_nodes(local_point, 4)
+    var radius := maxf(_cell_scale() * 1.6, 0.28)
     var weight_sum := 0.0
-    for entry in nearest:
-        weight_sum += 1.0 / (0.20 + sqrt(float(entry.distance)))
+    var weights: Array[float] = []
+    for i in _positions.size():
+        if bool(_retired[i]):
+            weights.append(0.0)
+            continue
+        var weight := _wendland(
+            _positions[i].distance_to(local_point) / radius
+        )
+        weights.append(weight)
+        weight_sum += weight
     if weight_sum <= 0.0:
+        var nearest := _nearest_nodes(local_point, 1)
+        if nearest.is_empty():
+            return
+        var index := int(nearest[0].index)
+        if not bool(_retired[index]):
+            _forces[index] += force
         return
-    for entry in nearest:
-        var weight := (
-            1.0 / (0.20 + sqrt(float(entry.distance)))
-        ) / weight_sum
-        _forces[int(entry.index)] += force * weight
+    for i in _positions.size():
+        if weights[i] <= 0.0:
+            continue
+        _forces[i] += force * (weights[i] / weight_sum)
 
 
 ## A fluid reaching this surface at a point, not everywhere at once. Feeds
@@ -280,26 +312,45 @@ func apply_impact(
         if safe_impulse.length_squared() > 0.0001
         else Vector3.UP
     )
+    _last_impact_radius = impact_kernel_radius(energy)
     _release_point = local_point
     _release_direction = _last_impact_direction
     _release_momentum += safe_impulse
     _input_energy += energy
 
-    var nearest := _nearest_nodes(local_point, 4)
+    var radius := _last_impact_radius
     var weight_sum := 0.0
-    for entry in nearest:
-        weight_sum += 1.0 / (0.16 + sqrt(float(entry.distance)))
-    for entry in nearest:
-        var weight := (
-            1.0 / (0.16 + sqrt(float(entry.distance)))
-        ) / maxf(weight_sum, 0.001)
-        var index := int(entry.index)
-        if not _pinned[index] or _fracture_finalized:
-            _velocities[index] += (
+    var weights: Array[float] = []
+    for i in _positions.size():
+        if bool(_retired[i]):
+            weights.append(0.0)
+            continue
+        var weight := _wendland(
+            _positions[i].distance_to(local_point) / maxf(radius, 0.001)
+        )
+        weights.append(weight)
+        weight_sum += weight
+    if weight_sum <= 0.0:
+        var nearest := _nearest_nodes(local_point, 1)
+        if not nearest.is_empty():
+            var index := int(nearest[0].index)
+            weights[index] = 1.0
+            weight_sum = 1.0
+    for i in _positions.size():
+        if weights[i] <= 0.0:
+            continue
+        var weight := weights[i] / maxf(weight_sum, 0.001)
+        if not _pinned[i] or _fracture_finalized:
+            _velocities[i] += (
                 safe_impulse * weight / maxf(_node_mass, 0.001)
             )
 
-    var radius := maxf(span.length() * 0.34, 0.8)
+    var terms := EnergyPartition.split(energy)
+    var core_share := float(terms.fracture) * (
+        CORE_FRACTURE_SHARE / maxf(EnergyPartition.FRACTURE_SHARE, 0.001)
+    )
+    var front_share := maxf(float(terms.fracture) - core_share, 0.0)
+    var bond_radius := radius * 0.72
     var bond_weights: Array[float] = []
     var bond_weight_sum := 0.0
     for bond in _bonds:
@@ -307,21 +358,24 @@ func apply_impact(
             _positions[int(bond.a)]
             + _positions[int(bond.b)]
         ) * 0.5
-        var distance := midpoint.distance_to(local_point)
-        var weight := exp(-distance * distance / (radius * radius))
+        var weight := _wendland(
+            midpoint.distance_to(local_point) / maxf(bond_radius, 0.001)
+        )
         bond_weights.append(weight)
         if bool(bond.active):
             bond_weight_sum += weight
 
-    var fracture_share := energy * 0.46
+    if bond_weight_sum <= 0.0:
+        bond_weight_sum = 0.001
     for bond_index in _bonds.size():
         var bond := _bonds[bond_index]
         if not bool(bond.active):
             continue
-        var work := fracture_share * (
-            bond_weights[bond_index]
-            / maxf(bond_weight_sum, 0.001)
+        var work := core_share * (
+            bond_weights[bond_index] / bond_weight_sum
         )
+        if work <= 0.0:
+            continue
         bond.fracture_work = float(bond.fracture_work) + work
         var work_damage := float(bond.fracture_work) / maxf(
             float(bond.fracture_cost),
@@ -330,8 +384,13 @@ func apply_impact(
         bond.damage = maxf(float(bond.damage), work_damage)
         if float(bond.damage) >= 1.0:
             _break_bond(bond)
+    _crack_budget = minf(
+        _crack_budget + front_share,
+        RESIDUAL_ENERGY_CEILING
+    )
+    _seed_crack_fronts(local_point, _last_impact_direction, energy)
     _residual_energy = minf(
-        _residual_energy + energy * 0.26,
+        _residual_energy + float(terms.residual),
         RESIDUAL_ENERGY_CEILING
     )
     _revision += 1
@@ -342,6 +401,8 @@ func apply_impact(
 func _nearest_nodes(local_point: Vector3, count: int) -> Array:
     var result: Array = []
     for i in _positions.size():
+        if i < _retired.size() and bool(_retired[i]):
+            continue
         var entry := {
             "index": i,
             "distance": _positions[i].distance_squared_to(local_point)
@@ -453,6 +514,9 @@ func _step_substep(delta: float) -> void:
     var inverse_mass := 1.0 / maxf(_node_mass, 0.001)
     for i in _positions.size():
         _previous_positions[i] = _positions[i]
+        if is_retired(i):
+            _velocities[i] = Vector3.ZERO
+            continue
         if _pinned[i] and not _fracture_finalized:
             _positions[i] = _rest_positions[i]
             _velocities[i] = Vector3.ZERO
@@ -473,6 +537,9 @@ func _step_substep(delta: float) -> void:
 
     var moved := false
     for i in _positions.size():
+        if is_retired(i):
+            _velocities[i] = Vector3.ZERO
+            continue
         if _pinned[i] and not _fracture_finalized:
             _positions[i] = _rest_positions[i]
             _velocities[i] = Vector3.ZERO
@@ -489,6 +556,8 @@ func _step_substep(delta: float) -> void:
             )
             _velocities[i] *= 0.24
         moved = moved or displacement.length_squared() > 0.000001
+    _update_wave(delta)
+    _advance_crack_fronts(delta)
     if moved:
         _revision += 1
 
@@ -660,6 +729,8 @@ func get_deformation_state() -> Dictionary:
         "damage": _mean_damage(),
         "broken_fraction": get_broken_fraction(),
         "components": _component_count,
+        "stiffness_ratio": get_stiffness_ratio(),
+        "wave_peak": get_wave_peak(),
         "energy": get_energy_state()
     }
 
@@ -1137,8 +1208,354 @@ func get_energy_state() -> Dictionary:
         "plastic": _plastic_energy,
         "surface": _surface_energy,
         "residual": _residual_energy,
-        "components": _component_count
+        "crack_budget": _crack_budget,
+        "components": _component_count,
+        "stiffness_ratio": get_stiffness_ratio()
     }
+
+
+func impact_kernel_radius(energy: float) -> float:
+    var cell := _cell_scale()
+    var energy_ratio := clampf(
+        energy / maxf(total_mass * 18.0, 1.0),
+        0.0,
+        6.0
+    )
+    return cell * clampf(0.82 + sqrt(energy_ratio) * 1.05, 0.82, 2.65)
+
+
+func get_last_impact_point() -> Vector3:
+    return _last_impact_point
+
+
+func get_last_impact_direction() -> Vector3:
+    return _last_impact_direction
+
+
+func get_last_impact_radius() -> float:
+    return _last_impact_radius
+
+
+func is_retired(index: int) -> bool:
+    if index < 0 or index >= _retired.size():
+        return false
+    return bool(_retired[index])
+
+
+func nearest_node_index(local_point: Vector3) -> int:
+    var nearest := _nearest_nodes(local_point, 1)
+    if nearest.is_empty():
+        return -1
+    return int(nearest[0].index)
+
+
+func get_node_wave(index: int) -> float:
+    if index < 0 or index >= _wave.size():
+        return 0.0
+    var intensity := float(_wave[index])
+    return intensity / (1.0 + intensity)
+
+
+func get_wave_peak() -> float:
+    var peak := 0.0
+    for i in _wave.size():
+        if is_retired(i):
+            continue
+        peak = maxf(peak, float(_wave[i]))
+    return peak / (1.0 + peak)
+
+
+func get_stiffness_ratio() -> float:
+    if _bonds.is_empty():
+        return 1.0
+    var total := 0.0
+    for bond in _bonds:
+        if not bool(bond.active):
+            continue
+        var damage_scale := maxf((1.0 - float(bond.damage)) ** 2, 0.0)
+        total += damage_scale
+    return clampf(total / float(_bonds.size()), 0.0, 1.0)
+
+
+func get_crack_front_points() -> Array[Vector3]:
+    var points: Array[Vector3] = []
+    for front in _crack_fronts:
+        if not bool(front.get("alive", false)):
+            continue
+        var index := int(front.get("index", -1))
+        if index < 0 or index >= _positions.size() or is_retired(index):
+            continue
+        points.append(_positions[index])
+    return points
+
+
+func _seed_crack_fronts(
+        local_point: Vector3,
+        direction: Vector3,
+        energy: float
+) -> void:
+    var origin := nearest_node_index(local_point)
+    if origin < 0:
+        return
+    var energy_ratio := clampf(
+        energy / maxf(total_mass * 18.0, 1.0),
+        0.0,
+        4.0
+    )
+    var count := clampi(3 + int(energy_ratio), 3, 7)
+    var planar := Vector3(direction.x, 0.0, direction.z)
+    if planar.length_squared() < 0.001:
+        planar = Vector3(1.0, 0.0, 0.0)
+    planar = planar.normalized()
+    var seed := local_point.x * 12.9898 + local_point.z * 78.233
+    var spin := fmod(absf(seed) * 0.17, TAU)
+    var per_front := _crack_budget / float(count)
+    var alive_count := 0
+    for front in _crack_fronts:
+        if bool(front.get("alive", false)):
+            alive_count += 1
+    for ray_index in count:
+        if alive_count >= MAX_CRACK_FRONTS:
+            break
+        var angle := spin + TAU * float(ray_index) / float(count)
+        var ray_dir := Vector3(cos(angle), 0.0, sin(angle))
+        if ray_index == 0:
+            ray_dir = planar
+        _crack_fronts.append({
+            "index": origin,
+            "direction": ray_dir.normalized(),
+            "budget": per_front,
+            "alive": true
+        })
+        alive_count += 1
+
+
+func _update_wave(delta: float) -> void:
+    if _wave.size() != _positions.size():
+        _wave.resize(_positions.size())
+    var decay := exp(-WAVE_DECAY_PER_SECOND * delta)
+    for i in _positions.size():
+        if is_retired(i):
+            _wave[i] = 0.0
+            continue
+        var kinetic := (
+            0.5
+            * _node_mass
+            * _velocities[i].length_squared()
+        )
+        _wave[i] = maxf(float(_wave[i]) * decay, kinetic)
+
+
+func _advance_crack_fronts(delta: float) -> void:
+    if _crack_fronts.is_empty() or _crack_budget <= 0.0:
+        return
+    var hops := clampi(ceili(delta / 0.006), 1, 5)
+    for _hop in hops:
+        var advanced := false
+        for front_index in _crack_fronts.size():
+            if _advance_one_front(front_index):
+                advanced = true
+        if not advanced:
+            break
+
+
+func _advance_one_front(front_index: int) -> bool:
+    var front: Dictionary = _crack_fronts[front_index]
+    if not bool(front.get("alive", false)):
+        return false
+    var node := int(front.get("index", -1))
+    if node < 0 or node >= _positions.size() or is_retired(node):
+        front.alive = false
+        _crack_fronts[front_index] = front
+        return false
+    var budget := float(front.get("budget", 0.0))
+    if budget < 1.0:
+        front.alive = false
+        _crack_fronts[front_index] = front
+        return false
+    var dir: Vector3 = front.get("direction", Vector3.RIGHT)
+    if dir.length_squared() < 0.0001:
+        dir = Vector3.RIGHT
+    dir = dir.normalized()
+
+    var best_bond: Dictionary = {}
+    var best_other := -1
+    var best_score := -INF
+    for bond in _bonds:
+        if not bool(bond.active):
+            continue
+        var other := -1
+        if int(bond.a) == node:
+            other = int(bond.b)
+        elif int(bond.b) == node:
+            other = int(bond.a)
+        else:
+            continue
+        if is_retired(other):
+            continue
+        var offset := _positions[other] - _positions[node]
+        if offset.length_squared() < 0.000001:
+            continue
+        var align := offset.normalized().dot(dir)
+        if align < 0.12:
+            continue
+        var tensile := _bond_tensile_energy(bond)
+        var local_wave := 0.5 * (
+            float(_wave[node]) + float(_wave[other])
+        )
+        var score := (
+            (tensile + local_wave * 0.45)
+            * (0.50 + 0.50 * align)
+            * (1.0 + float(bond.damage) * 0.85)
+        )
+        if score > best_score:
+            best_score = score
+            best_bond = bond
+            best_other = other
+    if best_other < 0 or best_bond.is_empty():
+        front.alive = false
+        _crack_fronts[front_index] = front
+        return false
+
+    var cost := float(best_bond.fracture_cost) * maxf(
+        1.0 - float(best_bond.damage),
+        0.12
+    )
+    var available := budget + float(_wave[node]) * 6.0
+    if available < cost * 0.28:
+        best_bond.damage = clampf(
+            float(best_bond.damage) + 0.07,
+            0.0,
+            1.0
+        )
+        best_bond.history = maxf(
+            float(best_bond.history),
+            damage_onset + float(best_bond.damage) * (
+                failure_strain - damage_onset
+            )
+        )
+        _crack_fronts[front_index] = front
+        return false
+
+    var spent := minf(cost, budget)
+    front.budget = budget - spent
+    _crack_budget = maxf(_crack_budget - spent, 0.0)
+    if (
+        float(best_bond.damage) >= 0.55
+        or available >= cost
+        or _bond_tensile_energy(best_bond) >= cost * 0.18
+    ):
+        _break_bond(best_bond)
+        front.index = best_other
+        var next_dir := _positions[best_other] - _positions[node]
+        if next_dir.length_squared() > 0.0001:
+            front.direction = next_dir.normalized().lerp(dir, 0.35).normalized()
+        _crack_fronts[front_index] = front
+        return true
+
+    best_bond.damage = clampf(float(best_bond.damage) + 0.32, 0.0, 1.0)
+    best_bond.history = maxf(float(best_bond.history), damage_onset)
+    _crack_fronts[front_index] = front
+    return false
+
+
+func _bond_tensile_energy(bond: Dictionary) -> float:
+    var first := int(bond.a)
+    var second := int(bond.b)
+    var rest := maxf(float(bond.rest), 0.0001)
+    var length := _positions[first].distance_to(_positions[second])
+    var elastic := (length - rest) / rest - float(bond.plastic)
+    var tensile := maxf(elastic, 0.0)
+    var damage_scale := maxf((1.0 - float(bond.damage)) ** 2, 0.025)
+    return (
+        0.5
+        * float(bond.stiffness)
+        * tensile
+        * tensile
+        * rest
+        * damage_scale
+    )
+
+
+func _cell_scale() -> float:
+    var dx := span.x / maxf(float(columns - 1), 1.0)
+    var dz := span.z / maxf(float(rows - 1), 1.0)
+    return maxf(0.08, (absf(dx) + absf(dz)) * 0.5)
+
+
+func _wendland(q: float) -> float:
+    if q >= 1.0:
+        return 0.0
+    var x := maxf(0.0, 1.0 - q)
+    return x * x * x * x * (1.0 + 4.0 * q)
+
+
+func get_height_map_data() -> PackedFloat32Array:
+    var data := PackedFloat32Array()
+    data.resize(columns * rows)
+    for row in rows:
+        for column in columns:
+            var index := _index(column, row)
+            if is_retired(index):
+                data[row * columns + column] = NAN
+            else:
+                data[row * columns + column] = _positions[index].y
+    return data
+
+
+func take_detached_fragments(
+        fragment_thickness: float = 0.20,
+        minimum_nodes: int = 2
+) -> Array[Dictionary]:
+    _refresh_topology()
+    var components := _components()
+    if components.size() <= 1:
+        return []
+    var keep_index := 0
+    var keep_score := -INF
+    for i in components.size():
+        var score := float((components[i] as Array).size())
+        var has_pin := false
+        for node_index in components[i]:
+            if _pinned[int(node_index)] and not _fracture_finalized:
+                has_pin = true
+                break
+        if has_pin:
+            score += 100000.0
+        if score > keep_score:
+            keep_score = score
+            keep_index = i
+    var specs: Array[Dictionary] = []
+    for i in components.size():
+        if i == keep_index:
+            continue
+        var component: Array = components[i]
+        if component.size() < minimum_nodes:
+            _retire_component(component)
+            continue
+        specs.append(_component_spec(component, fragment_thickness))
+        _retire_component(component)
+    if not specs.is_empty():
+        _refresh_topology()
+        _revision += 1
+    return specs
+
+
+func _retire_component(component: Array) -> void:
+    for raw in component:
+        var index := int(raw)
+        if index < 0 or index >= _retired.size():
+            continue
+        _retired[index] = true
+        _velocities[index] = Vector3.ZERO
+        _forces[index] = Vector3.ZERO
+        if index < _wave.size():
+            _wave[index] = 0.0
+        _pinned[index] = true
+        for bond in _bonds:
+            if int(bond.a) == index or int(bond.b) == index:
+                if bool(bond.active):
+                    _break_bond(bond)
 
 
 func _components() -> Array:
@@ -1158,7 +1575,7 @@ func _components() -> Array:
         visited[i] = false
     var result: Array = []
     for start in _positions.size():
-        if visited[start]:
+        if visited[start] or is_retired(start):
             continue
         var component: Array[int] = []
         var queue: Array[int] = [start]

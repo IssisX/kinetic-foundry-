@@ -8,6 +8,8 @@ run/main_scene="res://Main.tscn"
 config/features=PackedStringArray("4.7", "GL Compatibility")
 
 [autoload]
+ClassCatalog="*res://scripts/class_catalog.gd"
+GameOptions="*res://scripts/game_options.gd"
 Fidelity="*res://scripts/fidelity.gd"
 MaterialResponse="*res://scripts/material_response.gd"
 ProcessPlant="*res://scripts/process_plant.gd"
@@ -32,6 +34,12 @@ renderer/rendering_method="gl_compatibility"
 renderer/rendering_method.mobile="gl_compatibility"
 textures/default_filters/use_nearest_mipmap_filter=false
 textures/vram_compression/import_etc2_astc=true
+lights_and_shadows/directional_shadow/size=4096
+lights_and_shadows/directional_shadow/size.mobile=2048
+lights_and_shadows/directional_shadow/soft_shadow_filter_quality=3
+lights_and_shadows/positional_shadow/soft_shadow_filter_quality=2
+lights_and_shadows/positional_shadow/atlas_size=2048
+environment/defaults/default_clear_color=Color(0.145098, 0.141176, 0.133333, 1)
 
 [physics]
 common/physics_ticks_per_second=60

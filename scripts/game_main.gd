@@ -4,6 +4,8 @@ const PlayerScene = preload("res://scripts/player.gd")
 const EnemyScene = preload("res://scripts/enemy.gd")
 const ExcavatorScene = preload("res://scripts/excavator_contact.gd")
 const CraneScene = preload("res://scripts/crane.gd")
+const DozerScene = preload("res://scripts/dozer.gd")
+const MenuScene = preload("res://scripts/foundry_menu.gd")
 const StructureScene = preload("res://scripts/structure_material.gd")
 const CameraRigScene = preload("res://scripts/camera_rig.gd")
 const HudScene = preload("res://scripts/machine_hud.gd")
@@ -25,6 +27,8 @@ var camera_rig
 var player
 var excavator
 var crane
+var dozer
+var menu
 var structure
 var yard
 var facility_expansion
@@ -61,6 +65,10 @@ func _ready() -> void:
         var combat_check := CombatCheckScene.new()
         add_child(combat_check)
         combat_check.begin(self)
+    else:
+        menu = MenuScene.new()
+        add_child(menu)
+        menu.begin(self)
 
 func _process(delta: float) -> void:
     if OS.get_environment("KF_CAPTURE") == "1":
@@ -77,44 +85,50 @@ func _build_environment() -> void:
     var env := Environment.new()
 
     var sky_mat := ProceduralSkyMaterial.new()
-    sky_mat.sky_top_color = Color(0.16, 0.48, 0.86)
-    sky_mat.sky_horizon_color = Color(0.66, 0.81, 0.96)
-    sky_mat.ground_bottom_color = Color(0.15, 0.17, 0.17)
-    sky_mat.ground_horizon_color = Color(0.46, 0.54, 0.58)
-    sky_mat.sun_angle_max = 12.0
-    sky_mat.sun_curve = 0.06
+    sky_mat.sky_top_color = Color(0.28, 0.36, 0.44)
+    sky_mat.sky_horizon_color = Color(0.76, 0.64, 0.48)
+    sky_mat.ground_bottom_color = Color(0.12, 0.12, 0.11)
+    sky_mat.ground_horizon_color = Color(0.40, 0.38, 0.33)
+    sky_mat.sky_curve = 0.13
+    sky_mat.sun_angle_max = 18.0
+    sky_mat.sun_curve = 0.08
     var sky := Sky.new()
     sky.sky_material = sky_mat
 
     env.background_mode = Environment.BG_SKY
     env.sky = sky
-    env.background_energy_multiplier = 1.08
-    env.ambient_light_source = Environment.AMBIENT_SOURCE_SKY
-    env.ambient_light_color = Color(0.72, 0.80, 0.88)
-    env.ambient_light_energy = 0.88
+    env.background_energy_multiplier = 1.0
+    env.ambient_light_source = Environment.AMBIENT_SOURCE_COLOR
+    env.ambient_light_color = Color(0.48, 0.54, 0.60)
+    env.ambient_light_energy = 0.58
     env.reflected_light_source = Environment.REFLECTION_SOURCE_SKY
     env.tonemap_mode = Environment.TONE_MAPPER_FILMIC
+    env.tonemap_exposure = 1.08
     env.fog_enabled = true
-    env.fog_light_color = Color(0.72, 0.80, 0.86)
-    env.fog_light_energy = 0.50
-    env.fog_density = 0.0015
+    env.fog_light_color = Color(0.64, 0.58, 0.48)
+    env.fog_light_energy = 0.42
+    env.fog_density = 0.0014
+    env.fog_aerial_perspective = 0.22
+    env.fog_sky_affect = 0.40
     env.fog_height = 0.0
-    env.fog_height_density = 0.018
+    env.fog_height_density = 0.016
     world.environment = env
     add_child(world)
 
+    # Afternoon sun, engine-default shadow path. Custom 2/4-split maps on
+    # Compatibility software GL marked the whole yard as shadow.
     var sun := DirectionalLight3D.new()
-    sun.rotation_degrees = Vector3(-54.0, -34.0, 0.0)
-    sun.light_color = Color(1.0, 0.94, 0.82)
-    sun.light_energy = 2.55
+    sun.rotation_degrees = Vector3(-34.0, -48.0, 0.0)
+    sun.light_color = Color(1.0, 0.90, 0.74)
+    sun.light_energy = 2.30
     sun.shadow_enabled = true
-    sun.directional_shadow_max_distance = 125.0
+    sun.directional_shadow_max_distance = 90.0
     add_child(sun)
 
     var sky_fill := DirectionalLight3D.new()
-    sky_fill.rotation_degrees = Vector3(-32.0, 146.0, 0.0)
-    sky_fill.light_color = Color(0.54, 0.72, 0.96)
-    sky_fill.light_energy = 0.58
+    sky_fill.rotation_degrees = Vector3(-22.0, 132.0, 0.0)
+    sky_fill.light_color = Color(0.52, 0.64, 0.76)
+    sky_fill.light_energy = 0.22
     sky_fill.shadow_enabled = false
     add_child(sky_fill)
 
@@ -161,8 +175,19 @@ func _build_gameplay() -> void:
     crane.player_exited.connect(_on_machine_exited)
     crane.machine_disabled.connect(_on_machine_disabled)
 
+    dozer = DozerScene.new()
+    dozer.position = Vector3(15.5, -0.12, 8.5)
+    dozer.rotation.y = 0.18
+    add_child(dozer)
+    dozer.configure(hud, camera_rig)
+    dozer.player_entered.connect(_on_machine_entered)
+    dozer.player_exited.connect(_on_machine_exited)
+    dozer.machine_disabled.connect(_on_machine_disabled)
+
     var operator = _spawn_enemy(Vector3(4.0, 0.03, -3.0), EnemyScene.RIGGER)
     excavator.set_enemy_driver(operator)
+    var dozer_op = _spawn_enemy(Vector3(15.5, 0.03, 8.5), EnemyScene.RIGGER)
+    dozer.set_enemy_driver(dozer_op)
     _spawn_enemy(Vector3(-3.0, 0.03, 5.0), EnemyScene.GRUNT)
     _spawn_enemy(Vector3(1.0, 0.03, 10.0), EnemyScene.PLATE)
     _spawn_enemy(Vector3(8.0, 0.03, 7.0), EnemyScene.THROWER)
@@ -334,13 +359,15 @@ func _update_interaction_prompt() -> void:
 
     var target = _nearest_machine(player.global_position)
     if target == null:
-        if excavator != null and excavator.disabled:
+        for machine in get_tree().get_nodes_in_group("machine"):
+            if not is_instance_valid(machine) or not machine.disabled:
+                continue
             var wreck_distance: float = player.global_position.distance_to(
-                excavator.global_position
+                machine.global_position
             )
             if wreck_distance < 6.5:
                 hud.set_interaction_hint(
-                    "EXCAVATOR DISABLED // WRECKAGE REMAINS PHYSICAL"
+                    "%s DISABLED // WRECKAGE REMAINS PHYSICAL" % machine.machine_name()
                 )
                 return
         hud.set_interaction_hint("")
@@ -400,6 +427,6 @@ func _reclaim_machine(machine) -> bool:
         )
         _reclaim_cooldown = 6.0
         return true
-    if best.has_method("set_target") and best_distance < 15.0:
+    if best.archetype == EnemyScene.RIGGER and best.has_method("set_target") and best_distance < 15.0:
         best.set_target(machine)
     return false

@@ -72,6 +72,7 @@ var _demand_luff := 0.0
 var _demand_rope := 0.0
 var _warn_cooldown := 0.0
 var _tipping_damage_bank := 0.0
+var _load_path_reaction := 0.0
 
 
 func _ready() -> void:
@@ -147,8 +148,12 @@ func get_grip_stress() -> float:
     return _grip.stress
 
 
-func set_load_path_feedback(_state: Dictionary) -> void:
-    pass
+func set_load_path_feedback(state: Dictionary) -> void:
+    _load_path_reaction = clampf(
+        float(state.get("reaction_ratio", 0.0)),
+        0.0,
+        1.0
+    )
 
 
 ## Radius is the horizontal distance from the slew centre to the hook. It
@@ -271,7 +276,7 @@ func _player_control(delta: float) -> void:
     # A crane close to tipping does not get to swing faster.
     var authority := clampf(1.0 - maxf(_tipping_ratio - 0.55, 0.0) * 0.85, 0.30, 1.0)
 
-    var axis: Vector2 = hud.move_axis
+    var axis: Vector2 = control_axis()
     var forward := -global_basis.z
     var throttle := -axis.y
     velocity.x = forward.x * throttle * drive_speed * authority
@@ -331,6 +336,10 @@ func _enemy_control(delta: float) -> void:
         ROPE_MIN,
         ROPE_MAX
     )
+    if distance > 14.0:
+        velocity.x = move_toward(velocity.x, 0.0, 9.0 * delta)
+        velocity.z = move_toward(velocity.z, 0.0, 9.0 * delta)
+        return
     if distance > 9.0:
         var forward := -global_basis.z
         velocity.x = forward.x * drive_speed * 0.7
@@ -560,6 +569,8 @@ func _update_tipping(delta: float) -> void:
         machine_mass,
         half_base
     )
+    if _grip.is_holding():
+        target += _load_path_reaction * 0.16
     _tipping_ratio = move_toward(_tipping_ratio, target, delta * 2.4)
 
     var lever := _hook_position - global_position

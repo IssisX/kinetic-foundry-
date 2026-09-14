@@ -13,6 +13,7 @@ var _coupling: Array[float] = []
 var _s: Array[float] = []
 var _v: Array[float] = []
 var _asleep_frames := 0
+var _stiffness_scale := 1.0
 
 const SLEEP_AMPLITUDE := 0.00003
 const SLEEP_FRAMES_REQUIRED := 20
@@ -24,6 +25,7 @@ func configure(frequencies_hz: Array, damping_ratios: Array) -> void:
     _coupling.clear()
     _s.clear()
     _v.clear()
+    _stiffness_scale = 1.0
     for i in frequencies_hz.size():
         _omega.append(TAU * float(frequencies_hz[i]))
         _zeta.append(
@@ -42,6 +44,23 @@ func excite(velocity_kick: float) -> void:
     for i in _v.size():
         _v[i] += velocity_kick * _coupling[i]
     _asleep_frames = 0
+
+
+## Remaining lattice stiffness changes the frequencies. A cracked plate
+## rings lower and duller because ω ∝ sqrt(k/m), not because a second
+## sound table was authored.
+func set_stiffness_scale(scale: float) -> void:
+    var next_scale := clampf(scale, 0.12, 1.0)
+    if is_equal_approx(next_scale, _stiffness_scale):
+        return
+    var ratio := sqrt(next_scale / maxf(_stiffness_scale, 0.12))
+    for i in _omega.size():
+        _omega[i] *= ratio
+    _stiffness_scale = next_scale
+
+
+func stiffness_scale() -> float:
+    return _stiffness_scale
 
 
 func step(dt: float) -> void:

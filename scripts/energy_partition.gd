@@ -15,6 +15,7 @@ const KINETIC_SHARE := 0.28
 const PLASTIC_SHARE := 0.10
 const ACOUSTIC_SHARE := 0.02
 const RESIDUAL_SHARE := 0.14
+const IMMOVABLE_MASS := 1.0e9
 
 
 static func split(energy: float) -> Dictionary:
@@ -63,3 +64,9 @@ static func collision_energy(
     var second := maxf(mass_b, 0.001)
     var reduced := (first * second) / (first + second)
     return 0.5 * reduced * relative_speed * relative_speed
+
+
+## Closing energy against an immovable world (ground, a locked column).
+## Same formula as `collision_energy`; the second mass is just large.
+static func against_world(mass: float, speed: float) -> float:
+    return collision_energy(mass, IMMOVABLE_MASS, speed)

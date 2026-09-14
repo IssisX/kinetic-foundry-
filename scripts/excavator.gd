@@ -13,6 +13,10 @@ var tool_angle := -0.18
 var arm_yaw := 0.0
 var ai_time := 0.0
 
+const GRAB_MASS_LIMIT := 1600.0
+const ARM_CONTACT_MASK := 1 | 8
+const ARM_EFFECTIVE_MASS := 360.0
+
 var hydraulic_health := 260.0
 var track_health := 320.0
 
@@ -44,6 +48,11 @@ const AI_ATTACK_DAMAGE := 26.0
 ## the "smash down at the player" motion never reads as digging into dirt.
 const AI_STRIKE_STICK := -0.20
 const AI_STRIKE_TOOL := -1.0
+## Past this distance from the machine's own work_anchor (set once in
+## machine_base.gd on ready), it gives up the chase and returns home instead
+## of dragging itself across the whole yard after the player - the original
+## "follows me everywhere" complaint, distinct from whether it can fight.
+const AI_LEASH_RADIUS := 13.5
 
 var _ai_attack_windup := 0.0
 var _ai_attack_cooldown := 0.0
@@ -60,7 +69,7 @@ var _tool: Node3D
 var _thumb: Node3D
 var _grip_anchor: Node3D
 var _impact_probe: Area3D
-var _work_light: OmniLight3D
+var _work_light: Light3D
 var _engine_cover: MeshInstance3D
 var _arm_shapes: Array[CollisionShape3D] = []
 var _impact_cooldown := 0.0
@@ -79,6 +88,7 @@ var _safe_boom_angle := -0.24
 var _safe_stick_angle := 0.42
 var _safe_tool_angle := -0.18
 var _safe_arm_yaw := 0.0
+var _ground_work_cooldown := 0.0
 
 func _ready() -> void:
     super()
@@ -231,6 +241,7 @@ func _physics_process(delta: float) -> void:
     _update_tool_motion(delta)
     _update_held_load(delta)
     _resolve_tool_impacts()
+    _scrape_ground(delta)
     _update_damage_fx()
     _update_telemetry()
     _publish_hydraulic_demand(delta)
@@ -259,7 +270,7 @@ func _player_control(delta: float) -> void:
     var hydraulic_ratio := maxf(get_hydraulic_ratio(), 0.22)
     hydraulic_ratio *= 1.0 - _load_path_resistance * 0.18
     hydraulic_ratio *= actuator_speed_ratio()
-    var axis: Vector2 = hud.move_axis
+    var axis: Vector2 = control_axis()
     var throttle: float = -axis.y
     var steering: float = axis.x
     var forward: Vector3 = -global_basis.z
@@ -305,13 +316,38 @@ func _enemy_control(delta: float) -> void:
     var to_target: Vector3 = target.global_position - global_position
     to_target.y = 0.0
     var distance := to_target.length()
-    if distance > 0.1:
-        var desired: float = atan2(-to_target.x, -to_target.z)
-        rotation.y = lerp_angle(rotation.y, desired, 0.018)
 
     if _ai_attack_windup > 0.0:
         _step_ai_strike(delta, target, distance, to_target)
         return
+
+    # Territory, not a leash on the target: past AI_LEASH_RADIUS from its own
+    # work_anchor (machine_base.gd), give up the chase and go home instead of
+    # dragging itself across the whole yard - that was the reported bug, not
+    # the attack itself. Inside the leash, the full engage-and-strike logic
+    # below is unchanged and untouched by this radius.
+    var home := work_anchor if work_anchor.length_squared() > 0.01 else global_position
+    var to_home: Vector3 = home - global_position
+    to_home.y = 0.0
+    if to_home.length() > AI_LEASH_RADIUS:
+        var desired_home: float = atan2(-to_home.x, -to_home.z)
+        rotation.y = lerp_angle(rotation.y, desired_home, 0.02)
+        var forward_home := -global_basis.z
+        var track_ratio := maxf(get_track_ratio(), 0.22)
+        velocity.x = forward_home.x * 0.28 * drive_speed * track_ratio
+        velocity.z = forward_home.z * 0.28 * drive_speed * track_ratio
+        var hydro_home := maxf(get_hydraulic_ratio(), 0.24)
+        # Same verified-safe idle centers as the engaged sway below - a
+        # returning machine gets no exemption from the ground-clearance proof.
+        arm_yaw = sin(ai_time * 0.22) * 0.38 * hydro_home
+        boom_angle = 0.0 + sin(ai_time * 0.18) * 0.10 * hydro_home
+        stick_angle = 0.30 + sin(ai_time * 0.20) * 0.10 * hydro_home
+        tool_angle = -0.15 + sin(ai_time * 0.16) * 0.22 * hydro_home
+        return
+
+    if distance > 0.1:
+        var desired: float = atan2(-to_target.x, -to_target.z)
+        rotation.y = lerp_angle(rotation.y, desired, 0.018)
 
     var forward: Vector3 = -global_basis.z
     var throttle: float = 1.0 if distance > 7.0 else 0.0
@@ -395,6 +431,16 @@ func _set_interpolated_arm_pose(target_boom: float, target_stick: float, target_
     _apply_arm_pose()
 
 func _resolve_arm_contact_pose() -> void:
+    var arm_moved := (
+        absf(boom_angle - _safe_boom_angle) > 0.003
+        or absf(stick_angle - _safe_stick_angle) > 0.003
+        or absf(tool_angle - _safe_tool_angle) > 0.003
+        or absf(arm_yaw - _safe_arm_yaw) > 0.003
+        or _tool_tip_speed > 0.40
+    )
+    if not arm_moved:
+        _apply_arm_pose()
+        return
     var target_boom := boom_angle
     var target_stick := stick_angle
     var target_tool := tool_angle
@@ -422,40 +468,93 @@ func _resolve_arm_contact_pose() -> void:
 
 func _collect_hard_arm_contacts() -> Array[Node]:
     var contacts: Array[Node] = []
-    if _arm_shapes.is_empty() or get_world_3d() == null:
+    if get_world_3d() == null:
         return contacts
-    var space := get_world_3d().direct_space_state
-    var exclude: Array[RID] = [get_rid()]
+    var exclude: Array[RID] = _arm_query_exclude()
     if held_load is CollisionObject3D:
         exclude.append(held_load.get_rid())
     for collision in _arm_shapes:
-        if collision == null or collision.shape == null:
-            continue
-        var query := PhysicsShapeQueryParameters3D.new()
-        query.shape = collision.shape
-        query.transform = collision.global_transform
-        query.collision_mask = 8
-        query.collide_with_bodies = true
-        query.collide_with_areas = false
-        query.exclude = exclude
-        var hits := space.intersect_shape(query, 16)
-        for hit in hits:
-            var collider = hit.get("collider")
-            if collider == null or collider == self or collider == held_load:
-                continue
-            if collider is RigidBody3D and not collider.freeze:
-                continue
-            if not contacts.has(collider):
-                contacts.append(collider)
+        _append_shape_contacts(collision, ARM_CONTACT_MASK, exclude, contacts)
+    if held_load is CollisionObject3D:
+        _append_body_contacts(held_load, ARM_CONTACT_MASK, exclude, contacts)
     return contacts
+
+
+func _arm_query_exclude() -> Array[RID]:
+    if _floor_exclude.is_empty():
+        _collect_floor_rids()
+    var exclude: Array[RID] = [get_rid()]
+    for rid in _floor_exclude:
+        exclude.append(rid)
+    return exclude
+
+
+func _is_work_surface(collider: Node) -> bool:
+    if collider == null:
+        return true
+    if collider.is_in_group("yard_substrate"):
+        return true
+    if collider.name == "Ground":
+        return true
+    return false
+
+
+func _append_body_contacts(
+        body: CollisionObject3D,
+        mask: int,
+        exclude: Array[RID],
+        contacts: Array[Node]
+) -> void:
+    if body == null or not is_instance_valid(body):
+        return
+    var stack: Array = [body]
+    while not stack.is_empty():
+        var node: Node = stack.pop_back()
+        if node is CollisionShape3D:
+            _append_shape_contacts(node, mask, exclude, contacts)
+        for child in node.get_children():
+            stack.append(child)
+
+
+func _append_shape_contacts(
+        collision: CollisionShape3D,
+        mask: int,
+        exclude: Array[RID],
+        contacts: Array[Node]
+) -> void:
+    if collision == null or collision.shape == null or get_world_3d() == null:
+        return
+    var query := PhysicsShapeQueryParameters3D.new()
+    query.shape = collision.shape
+    query.transform = collision.global_transform
+    query.collision_mask = mask
+    query.collide_with_bodies = true
+    query.collide_with_areas = false
+    query.exclude = exclude
+    var hits := get_world_3d().direct_space_state.intersect_shape(query, 8)
+    for hit in hits:
+        var collider = hit.get("collider")
+        if not is_hard_world_contact(collider):
+            continue
+        if _is_work_surface(collider):
+            continue
+        if not contacts.has(collider):
+            contacts.append(collider)
+
 
 func _react_to_arm_contacts(contacts: Array[Node]) -> void:
     if _arm_contact_cooldown > 0.0:
         return
     var direction := _tool_tip_velocity.normalized() if _tool_tip_velocity.length_squared() > 0.04 else -_tool.global_basis.z
     var force := get_tool_force()
+    var load_hits: Array[Node] = []
+    if held_load is CollisionObject3D:
+        var exclude: Array[RID] = [get_rid(), held_load.get_rid()]
+        _append_body_contacts(held_load, ARM_CONTACT_MASK, exclude, load_hits)
     var damaged := false
     for collider in contacts:
+        if load_hits.has(collider):
+            continue
         if collider.has_method("machine_hit"):
             _deliver_machine_hit(
                 collider,
@@ -493,7 +592,7 @@ func _try_grip_load() -> bool:
     var best = null
     var best_distance := INF
     for body in _impact_probe.get_overlapping_bodies():
-        if body == self or not body.is_in_group("physics_prop") or body.mass > 420.0:
+        if body == self or not body.is_in_group("physics_prop") or body.mass > GRAB_MASS_LIMIT:
             continue
         var d: float = body.global_position.distance_to(_grip_anchor.global_position)
         if d < best_distance:
@@ -505,7 +604,7 @@ func _try_grip_load() -> bool:
         return false
     held_load = best
     hud.set_context(
-        "LOAD CLAMPED // MASS AMPLIFIES IMPACT + BRACING"
+        "LOAD CLAMPED // %d KG IS THE TOOL" % int(best.mass)
     )
     return true
 
@@ -561,22 +660,48 @@ func _resolve_tool_impacts() -> void:
             _impact_cooldown = 0.12
 
 
+func _scrape_ground(delta: float) -> void:
+    _ground_work_cooldown = maxf(0.0, _ground_work_cooldown - delta)
+    if _tool == null or _ground_work_cooldown > 0.0:
+        return
+    if _tool.global_position.y > 0.52 or _tool_tip_speed < 0.85:
+        return
+    var direction := (
+        _tool_tip_velocity.normalized()
+        if _tool_tip_velocity.length_squared() > 0.04
+        else -_tool.global_basis.z
+    )
+    work_ground(
+        _tool.global_position,
+        direction,
+        _tool_tip_speed * 16.0,
+        1.25
+    )
+    _ground_work_cooldown = 0.12
+
+
 func _deliver_machine_hit(
         body: Node,
         amount: float,
         direction: Vector3,
         world_point: Vector3
 ) -> void:
-    var effective_mass := 360.0
-    if is_holding_load():
-        effective_mass += float(held_load.get("mass"))
+    var tool_mass := ARM_EFFECTIVE_MASS + load_mass()
     var relative_speed := maxf(
         _tool_tip_speed,
         Vector3(velocity.x, 0.0, velocity.z).length()
     )
-    var impact_energy := (
-        0.5 * effective_mass * relative_speed * relative_speed
+    var kinematic := EnergyPartition.collision_energy(
+        tool_mass,
+        struck_mass(body),
+        relative_speed
     )
+    var hydraulic := EnergyPartition.nominal_impact_energy(
+        amount,
+        get_tool_force(),
+        clampf(relative_speed / 8.0, 0.0, 1.0)
+    )
+    var impact_energy := maxf(kinematic, hydraulic)
     if body.has_method("machine_hit_at"):
         body.machine_hit_at(
             amount,

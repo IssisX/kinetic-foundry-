@@ -1,4 +1,4 @@
-# Kinetic Foundry — Game Design Authority v0.1
+# Kinetic Foundry — Game Design Authority v0.4
 
 ## North star
 A grounded 3D industrial-dystopia action game where **power, combat, and
@@ -46,6 +46,21 @@ lift, drag, shove, brace, smash, pull, tear, demolish, manipulate debris,
 attack enemies, alter structures, create routes, sustain damage, and remain
 physically relevant after abandonment or failure.
 
+## Second flagship machine: crane
+The crane must support: drive, steer, slew, luff, hoist, clamp a suspended
+load, and let that load keep its own momentum. Radius drives tipping. The
+hook is a working assembly, not a cutscene.
+
+## Third flagship machine: tracked dozer
+The dozer must support: drive, steer, lift and tilt a blade plane, drop the
+blade into a shove, pile loose mass, and drop a ripper that tears what the
+blade cannot lift. Force is closing speed times machine mass. It is not an
+arm and it is not a pendulum.
+
+## View law
+Stress, deformation, and damage skin are solver state. Options may hide or
+show that state. They must not invent a second physics.
+
 ## Destruction
 Structural destruction is the default. Strategically important objects receive
 deeper material response. Supports, load paths, asymmetric loading, impacts,
@@ -57,6 +72,14 @@ Mostly human factions use the same industrial world as the player. They may
 commandeer machines, reposition barriers, destroy cover, reclaim equipment,
 abandon damaged machinery, fight rival groups, and manipulate environmental
 hazards.
+
+Crew hold a post. A rigger's job is a machine. A thrower's job is salvage.
+Everyone else stays on station until the player enters range or hits them.
+Hostile machines work their lane; they do not drive across the yard after
+the player. Contest happens at the station.
+
+People are readable: a face, a box torso, limbs that match the hips. No
+hat brim across the eyes, no shoulder capsule that reads as a hubcap.
 
 ## Campaign
 A hybrid industrial campaign with distinct physical objectives and long-term
@@ -83,6 +106,11 @@ Combat affects machines. Machines affect structures. Structures affect
 traversal. Damage affects machine capability. Machine failure creates debris.
 Debris becomes cover, weapon, obstacle, load, brace, or traversal geometry.
 Enemy AI and progression operate through these same authorities.
+
+The yard floor is a load. A blade or bucket spends the same energy partition
+on dirt that it spends on steel. Spoil piles ahead, becomes walkable mass,
+and gait samples it. People are loads too: machine mass writes crush and
+limp into the same body the walk solver is posing. Not a ragdoll.
 
 ## First vertical slice
 1. Player moves through an industrial yard on foot.

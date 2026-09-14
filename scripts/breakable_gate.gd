@@ -8,6 +8,8 @@ const StructuralDebris = preload(
 const PrecisionFractureNetwork = preload(
     "res://scripts/precision_fracture_network.gd"
 )
+const FoundryMaterial = preload("res://scripts/foundry_material.gd")
+const EnergyPartition = preload("res://scripts/energy_partition.gd")
 
 const PANEL_SIZE := 4.0
 const GRID_NODES := 7
@@ -18,6 +20,9 @@ var panel_health := [120.0, 120.0]
 var panels: Array[StaticBody3D] = []
 var panel_networks: Array = []
 var panel_cells: Array = []
+var panel_cell_collisions: Array = []
+var panel_cell_released: Array = []
+var panel_hulls: Array = []
 var panel_states: Array = []
 var _panel_base_positions: Array[Vector3] = []
 var _panel_seen_revision: Array[int] = [-1, -1]
@@ -80,10 +85,25 @@ func _build_gate() -> void:
                 panel.add_child(cell)
                 cells.append(cell)
         panel_cells.append(cells)
-        GeomUtil.add_box_collision(
+        var collisions: Array[CollisionShape3D] = []
+        var released: Array[bool] = []
+        for cell in cells:
+            var cell_shape := BoxShape3D.new()
+            cell_shape.size = Vector3(CELL_SIZE * 0.96, CELL_SIZE * 0.96, 0.20)
+            var cell_collision := CollisionShape3D.new()
+            cell_collision.shape = cell_shape
+            cell_collision.position = cell.position
+            panel.add_child(cell_collision)
+            collisions.append(cell_collision)
+            released.append(false)
+        panel_cell_collisions.append(collisions)
+        panel_cell_released.append(released)
+        var hull := GeomUtil.add_box_collision(
             panel,
             Vector3(PANEL_SIZE, PANEL_SIZE, 0.24)
         )
+        hull.name = "PanelHull"
+        panel_hulls.append(hull)
 
         for rib in 5:
             var rib_mesh := GeomUtil.box_mesh(
@@ -251,14 +271,6 @@ func damage_panel_at(
 
     _update_panel_skin(index)
 
-    var local_average: Vector3 = deformation.get("average", Vector3.ZERO)
-    var base_position := _panel_base_positions[index]
-    panel.position = base_position + Vector3(
-        0.0,
-        0.0,
-        clampf(local_average.y * 0.06, -0.05, 0.05)
-    )
-
     var broken_fraction := float(
         deformation.get("broken_fraction", 0.0)
     )
@@ -274,8 +286,14 @@ func damage_panel_at(
             "area": 0.14,
             "radius": maxf(CELL_SIZE, sqrt(energy) * 0.015),
             "fracture": clampf(broken_fraction * 2.5 + energy / 22000.0, 0.0, 1.0),
-            "novelty": clampf(0.58 + energy / 18000.0, 0.58, 1.0)
+            "novelty": clampf(0.58 + energy / 18000.0, 0.58, 1.0),
+            "stiffness_ratio": float(deformation.get("stiffness_ratio", 1.0))
         }
+    )
+    MaterialResponse.excite_resonance(panel, 310.0, energy)
+    MaterialResponse.set_resonance_stiffness(
+        panel,
+        float(deformation.get("stiffness_ratio", 1.0))
     )
     var catastrophic := (
         broken_fraction > 0.18
@@ -355,6 +373,19 @@ func _update_panel_skin(index: int, force: bool = false) -> void:
                 damaged_color,
                 smoothstep(0.0, 1.0, cell_damage) * 0.82
             )
+            cell.scale.z = clampf(1.0 - cell_damage * 0.55, 0.28, 1.0)
+            var collisions: Array = (
+                panel_cell_collisions[index]
+                if index < panel_cell_collisions.size()
+                else []
+            )
+            if cell_index < collisions.size():
+                var collision := collisions[cell_index] as CollisionShape3D
+                if collision != null and is_instance_valid(collision):
+                    collision.transform = cell.transform
+                    collision.scale = cell.scale
+            if cell_damage >= 0.86:
+                _punch_cell(index, cell_index, cell)
 
 func _break_panel(index: int, direction: Vector3) -> void:
     var old := panels[index]
@@ -433,6 +464,64 @@ func _break_panel(index: int, direction: Vector3) -> void:
     panel_health[index] = 0.0
     breached = true
 
+
+func _punch_cell(index: int, cell_index: int, cell: MeshInstance3D) -> void:
+    if index < 0 or index >= panel_cell_released.size():
+        return
+    var released: Array = panel_cell_released[index]
+    if cell_index < 0 or cell_index >= released.size() or bool(released[cell_index]):
+        return
+    released[cell_index] = true
+    panel_cell_released[index] = released
+    if is_instance_valid(cell):
+        cell.visible = false
+    if (
+        index < panel_cell_collisions.size()
+        and cell_index < panel_cell_collisions[index].size()
+    ):
+        var collision := panel_cell_collisions[index][cell_index] as CollisionShape3D
+        if collision != null and is_instance_valid(collision):
+            collision.disabled = true
+    if index < panel_hulls.size():
+        var hull := panel_hulls[index] as CollisionShape3D
+        if hull != null and is_instance_valid(hull):
+            hull.disabled = true
+    if cell == null or not is_instance_valid(cell):
+        return
+    var panel := panels[index]
+    if not is_instance_valid(panel):
+        return
+    var debris := StructuralDebris.new()
+    var parent := get_parent()
+    if parent == null:
+        parent = self
+    parent.add_child(debris)
+    debris.global_transform = cell.global_transform
+    var piece_mass := maxf(8.0, 310.0 / float(GRID_CELLS * GRID_CELLS))
+    debris.configure(
+        Vector3(CELL_SIZE * 0.92, CELL_SIZE * 0.92, 0.16),
+        Color(0.13, 0.14, 0.13),
+        piece_mass,
+        90.0,
+        "gate_panel"
+    )
+    var panel_state: SurfaceState = (
+        panel_states[index] if index < panel_states.size() else null
+    )
+    debris.bind_surface_state(
+        MaterialResponse.adopt_fragment(debris, panel_state, 0.55)
+    )
+    var outward := -panel.global_basis.z
+    var radial := debris.global_position - panel.global_position
+    if radial.length_squared() < 0.001:
+        radial = outward
+    debris.apply_central_impulse(
+        outward * piece_mass * 4.8
+        + radial.normalized() * piece_mass * 2.2
+        + Vector3.UP * piece_mass * 1.1
+    )
+
+
 func apply_world_loads(loads: Array, delta: float) -> void:
     if breached:
         return
@@ -461,8 +550,9 @@ func apply_world_loads(loads: Array, delta: float) -> void:
         wedge_side += signf(local.x) * body_mass
         if body is RigidBody3D:
             var normal_speed := absf(body.linear_velocity.z)
-            var kinetic_energy := (
-                0.5 * body_mass * normal_speed * normal_speed
+            var kinetic_energy := EnergyPartition.against_world(
+                body_mass,
+                normal_speed
             )
             if kinetic_energy > strongest_energy:
                 strongest_energy = kinetic_energy
@@ -522,6 +612,8 @@ func get_load_path_state() -> Dictionary:
     var max_damage := 0.0
     var broken_fraction := 0.0
     var max_displacement := 0.0
+    var stiffness := 1.0
+    var wave_peak := 0.0
     for network in panel_networks:
         var state: Dictionary = network.get_deformation_state()
         max_damage = maxf(
@@ -536,15 +628,27 @@ func get_load_path_state() -> Dictionary:
             max_displacement,
             float(state.get("max_displacement", 0.0))
         )
+        stiffness = minf(
+            stiffness,
+            float(state.get("stiffness_ratio", 1.0))
+        )
+        wave_peak = maxf(
+            wave_peak,
+            float(state.get("wave_peak", 0.0))
+        )
     return {
         "wedge_mass": wedge_mass,
         "pry_energy": pry_energy,
         "damage": max_damage,
         "broken_fraction": broken_fraction,
+        "stiffness_ratio": stiffness,
+        "wave_peak": wave_peak,
         "deformation": {
             "max_displacement": max_displacement,
             "damage": max_damage,
-            "broken_fraction": broken_fraction
+            "broken_fraction": broken_fraction,
+            "stiffness_ratio": stiffness,
+            "wave_peak": wave_peak
         },
         "breached": breached
     }

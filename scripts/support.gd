@@ -1,5 +1,7 @@
 extends StaticBody3D
 
+const EnergyPartition = preload("res://scripts/energy_partition.gd")
+
 var frame
 
 func machine_hit(amount: float, direction: Vector3) -> void:

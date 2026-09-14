@@ -8,9 +8,12 @@ extends Node
 ## author of contact effects. Shaders and audio never query the physics
 ## engine themselves; they read the state written here.
 
+const FoundryMaterial = preload("res://scripts/foundry_material.gd")
+const EnergyPartition = preload("res://scripts/energy_partition.gd")
+const SurfaceState = preload("res://scripts/surface_state.gd")
+const ModalResonator = preload("res://scripts/modal_resonator.gd")
 const ImpactFxScript = preload("res://scripts/impact_fx.gd")
 const MaterialFxScript = preload("res://scripts/material_fx.gd")
-const ModalResonatorScript = preload("res://scripts/modal_resonator.gd")
 
 const EVENT_IMPACT := "impact"
 const EVENT_SCRAPE := "scrape"
@@ -35,6 +38,7 @@ var _live_fx := 0
 var _events_this_second := 0
 var _event_clock := 0.0
 var _event_rate := 0.0
+var _emitting := false
 
 
 func _ready() -> void:
@@ -151,6 +155,59 @@ func impact(
         options
     )
     return consequence
+
+
+## Two bodies met. The resolver owns the joules; the callers own gameplay
+## damage. Relative speed and the two masses are the only inputs.
+func collide(
+        striker: Object,
+        struck: Object,
+        world_point: Vector3,
+        direction: Vector3,
+        relative_speed: float,
+        options: Dictionary = {}
+) -> Dictionary:
+    var mass_a := mass_of(striker)
+    var mass_b := mass_of(struck)
+    var energy := EnergyPartition.collision_energy(
+        mass_a,
+        mass_b,
+        relative_speed
+    )
+    if energy <= 0.0:
+        return {}
+    var merged := options.duplicate()
+    if not merged.has("radius"):
+        merged["radius"] = clampf(sqrt(energy) * 0.085, 2.4, 14.0)
+    if not merged.has("area"):
+        merged["area"] = 0.12
+    var consequence := impact(
+        struck,
+        world_point,
+        direction,
+        energy,
+        mass_a,
+        int(merged.get("tool_material", material_of(striker))),
+        merged
+    )
+    consequence["energy"] = energy
+    consequence["mass_a"] = mass_a
+    consequence["mass_b"] = mass_b
+    return consequence
+
+
+func mass_of(body: Object) -> float:
+    if body == null:
+        return EnergyPartition.IMMOVABLE_MASS
+    if body is RigidBody3D:
+        return maxf((body as RigidBody3D).mass, 1.0)
+    var value = body.get("mass")
+    if value != null:
+        return maxf(float(value), 1.0)
+    var machine_mass = body.get("machine_mass")
+    if machine_mass != null:
+        return maxf(float(machine_mass), 1.0)
+    return EnergyPartition.IMMOVABLE_MASS
 
 
 ## Sliding contact. Friction work removes coating along the real trajectory
@@ -458,7 +515,7 @@ func _resonator_for(target: Object) -> ModalResonator:
         return existing
     var data := FoundryMaterial.of(material_of(target))
     var base_hz := float(data.get("ring_hz", 285.0))
-    var created := ModalResonatorScript.new()
+    var created := ModalResonator.new()
     created.configure(
         [base_hz * 0.55, base_hz * 0.87, base_hz * 1.4],
         [0.045, 0.05, 0.065]
@@ -472,6 +529,13 @@ func _resonator_for(target: Object) -> ModalResonator:
 ## up, not a direct contact on the deck's own face.
 func excite_resonance(target: Object, mass: float, energy: float) -> void:
     _excite(target, mass, float(EnergyPartition.split(energy).acoustic))
+
+
+func set_resonance_stiffness(target: Object, stiffness_ratio: float) -> void:
+    var resonator := _resonator_for(target)
+    if resonator == null:
+        return
+    resonator.set_stiffness_scale(stiffness_ratio)
 
 
 func _excite(target: Object, mass: float, acoustic_energy: float) -> void:
@@ -630,6 +694,9 @@ func _emit(
         consequence: Dictionary,
         options: Dictionary
 ) -> void:
+    if _emitting:
+        return
+    _emitting = true
     var material_id := FoundryMaterial.STRUCTURAL_STEEL
     if state != null:
         material_id = state.material_id
@@ -656,10 +723,12 @@ func _emit(
             "surface_energy": float(terms.fracture),
             "plastic_energy": float(terms.plastic),
             "kinetic_energy": float(terms.kinetic),
+            "stiffness_ratio": float(options.get("stiffness_ratio", 1.0)),
             "grit": float(consequence.get("grit", 0.2)),
             "ring": float(consequence.get("ring", 0.6))
         }
     )
+    _emitting = false
 
 
 func _fx_parent(target: Object) -> Node:

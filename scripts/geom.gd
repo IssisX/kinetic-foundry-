@@ -16,6 +16,9 @@ static func material(
     mat.albedo_color = color
     mat.roughness = roughness
     mat.metallic = metallic
+    mat.shading_mode = BaseMaterial3D.SHADING_MODE_PER_PIXEL
+    mat.specular_mode = BaseMaterial3D.SPECULAR_SCHLICK_GGX
+    mat.disable_receive_shadows = false
     Detail.apply(
         mat,
         Detail.infer(roughness, metallic) if detail < 0 else detail
@@ -47,6 +50,40 @@ static func glass_material(
     mat.shading_mode = BaseMaterial3D.SHADING_MODE_PER_PIXEL
     mat.cull_mode = BaseMaterial3D.CULL_DISABLED
     return mat
+
+static func work_spot(
+        parent: Node,
+        pos: Vector3,
+        aim: Vector3,
+        color: Color,
+        energy: float,
+        range_value: float,
+        angle: float = 48.0,
+        cast_shadow: bool = false
+) -> SpotLight3D:
+    var light := SpotLight3D.new()
+    light.position = pos
+    light.light_color = color
+    light.light_energy = energy
+    light.light_specular = 0.35
+    light.spot_range = range_value
+    light.spot_angle = angle
+    light.spot_attenuation = 0.58
+    light.shadow_enabled = cast_shadow
+    light.shadow_bias = 0.04
+    light.shadow_normal_bias = 0.8
+    light.shadow_blur = 0.7
+    parent.add_child(light)
+    if parent is Node3D and aim.distance_to(pos) > 0.05:
+        var host := parent as Node3D
+        var world_aim: Vector3 = host.to_global(aim)
+        var dir: Vector3 = world_aim - light.global_position
+        if dir.length() > 0.05:
+            var up := Vector3.UP
+            if absf(dir.normalized().dot(up)) > 0.94:
+                up = Vector3.FORWARD
+            light.look_at(world_aim, up)
+    return light
 
 static func box_mesh(
         size: Vector3,
@@ -159,3 +196,26 @@ static func static_box(
     body.add_child(box_mesh(size, color, 0.78, 0.0, detail))
     add_box_collision(body, size)
     return body
+
+
+static func add_heightmap_collision(
+        body: CollisionObject3D,
+        width: int,
+        depth: int,
+        heights: PackedFloat32Array,
+        grid_span: Vector3,
+        y_offset: float = 0.0
+) -> CollisionShape3D:
+    var shape := HeightMapShape3D.new()
+    shape.map_width = maxi(width, 2)
+    shape.map_depth = maxi(depth, 2)
+    shape.map_data = heights
+    var node := CollisionShape3D.new()
+    node.name = "DeformedHeight"
+    node.shape = shape
+    node.position.y = y_offset
+    var sx := grid_span.x / maxf(float(shape.map_width - 1), 1.0)
+    var sz := grid_span.z / maxf(float(shape.map_depth - 1), 1.0)
+    node.scale = Vector3(sx, 1.0, sz)
+    body.add_child(node)
+    return node

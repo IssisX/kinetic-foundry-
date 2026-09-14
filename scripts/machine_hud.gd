@@ -105,3 +105,13 @@ func _draw_move_zone() -> void:
         maxi(11, int(13.0 * s)),
         Color(0.92, 0.86, 0.68, 0.88)
     )
+    var look_pos := Vector2(_view_size.x - 300.0 * s, _view_size.y - 320.0 * s)
+    draw_string(
+        ThemeDB.fallback_font,
+        look_pos,
+        str(_machine_profile.get("right_hint", "WORKING ASSEMBLY")),
+        HORIZONTAL_ALIGNMENT_RIGHT,
+        240.0 * s,
+        maxi(11, int(13.0 * s)),
+        Color(0.92, 0.86, 0.68, 0.88)
+    )
