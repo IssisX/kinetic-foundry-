@@ -106,7 +106,7 @@ func _look() -> Dictionary:
         "eye": eyes[rng.randi() % eyes.size()],
         "hair": hairs[rng.randi() % hairs.size()],
         "hat": Color(0.82, 0.62, 0.12) if rigger else Color(0.76, 0.54, 0.10),
-        "wear_hat": (not runner) and (rigger or rng.randf() > 0.45),
+        "wear_hat": rigger,
         "beard": heavy or rng.randf() > 0.58,
         "mustache": (not heavy) and rng.randf() > 0.62,
         "scowl": heavy or plate,
@@ -205,110 +205,110 @@ func _build_head(root: Node3D, look: Dictionary) -> void:
 
     # Flattened in Z so the face is a plane we can put features on,
     # not a sphere the camera reads as a helmet.
-    var skull := GeomUtil.sphere_mesh(0.150 * head_s, skin)
-    skull.scale = Vector3(0.90, 1.08, 0.78)
-    skull.position = Vector3(0.0, 0.22, 0.04)
+    var skull := GeomUtil.sphere_mesh(0.148 * head_s, skin)
+    skull.scale = Vector3(0.92, 1.06, 0.80)
+    skull.position = Vector3(0.0, 0.228, 0.055)
     root.add_child(skull)
 
-    _jaw = GeomUtil.sphere_mesh(0.096, skin)
-    _jaw.scale = Vector3(0.88, 0.58, 0.72)
-    _jaw.position = Vector3(0.0, 0.108, 0.00)
+    var face := GeomUtil.box_mesh(Vector3(0.168, 0.176, 0.070), skin, 0.62, 0.0)
+    face.position = Vector3(0.0, 0.186, -0.102)
+    root.add_child(face)
+
+    _jaw = GeomUtil.box_mesh(Vector3(0.140, 0.070, 0.080), skin, 0.64, 0.0)
+    _jaw.position = Vector3(0.0, 0.100, -0.090)
     root.add_child(_jaw)
 
-    var chin := GeomUtil.sphere_mesh(0.040, skin)
-    chin.scale = Vector3(0.86, 0.58, 0.90)
-    chin.position = Vector3(0.0, 0.062, -0.118)
+    var chin := GeomUtil.sphere_mesh(0.036, skin)
+    chin.scale = Vector3(0.90, 0.55, 0.85)
+    chin.position = Vector3(0.0, 0.058, -0.128)
     root.add_child(chin)
 
-    var nose := GeomUtil.box_mesh(Vector3(0.032, 0.062, 0.058), skin, 0.62, 0.0)
-    nose.position = Vector3(0.0, 0.178, -0.162)
+    var nose := GeomUtil.box_mesh(Vector3(0.028, 0.058, 0.052), skin, 0.55, 0.0)
+    nose.position = Vector3(0.0, 0.176, -0.168)
     root.add_child(nose)
 
     _mouth = GeomUtil.box_mesh(
-        Vector3(mouth_w, 0.016, 0.022),
+        Vector3(mouth_w, 0.016, 0.020),
         Color(0.42, 0.16, 0.16) if scowl else Color(0.50, 0.24, 0.24),
         0.50,
         0.0
     )
-    _mouth.position = Vector3(0.0, 0.100 if scowl else 0.108, -0.150)
+    _mouth.position = Vector3(0.0, 0.096 if scowl else 0.104, -0.155)
     root.add_child(_mouth)
 
     for side in [-1.0, 1.0]:
-        var ear := GeomUtil.sphere_mesh(0.036, skin)
-        ear.scale = Vector3(0.36, 1.16, 0.70)
-        ear.position = Vector3(side * 0.138, 0.198, 0.028)
+        var ear := GeomUtil.sphere_mesh(0.034, skin)
+        ear.scale = Vector3(0.34, 1.12, 0.68)
+        ear.position = Vector3(side * 0.140, 0.200, 0.030)
         root.add_child(ear)
 
-        var cheek := GeomUtil.sphere_mesh(0.046, skin)
-        cheek.scale = Vector3(0.70, 0.64, 0.52)
-        cheek.position = Vector3(side * 0.090, 0.142, -0.078)
+        var cheek := GeomUtil.sphere_mesh(0.040, skin)
+        cheek.scale = Vector3(0.62, 0.58, 0.48)
+        cheek.position = Vector3(side * 0.078, 0.140, -0.092)
         root.add_child(cheek)
 
         var brow := GeomUtil.box_mesh(
-            Vector3(0.064, 0.018, 0.024),
+            Vector3(0.052, 0.012, 0.018),
             hair,
             0.92,
             0.0
         )
         brow.position = Vector3(
-            side * 0.048,
-            0.236 - brow_drop,
-            -0.138
+            side * 0.050,
+            0.248 - brow_drop,
+            -0.142
         )
-        brow.rotation.z = side * (0.22 if scowl else 0.08)
+        brow.rotation.z = side * (0.16 if scowl else 0.05)
         root.add_child(brow)
         if side < 0.0:
             _brow_l = brow
         else:
             _brow_r = brow
 
-        var lid := GeomUtil.box_mesh(Vector3(0.056, 0.010, 0.014), skin, 0.66, 0.0)
-        lid.position = Vector3(side * 0.048, 0.214, -0.148)
+        var lid := GeomUtil.box_mesh(Vector3(0.048, 0.006, 0.010), skin, 0.60, 0.0)
+        lid.position = Vector3(side * 0.048, 0.218, -0.150)
         root.add_child(lid)
         if side < 0.0:
             _lid_l = lid
         else:
             _lid_r = lid
 
-        # Eyes sit on the face plane, proud of the skull so a close camera
-        # actually sees them instead of a blank tan sphere.
-        var sclera := GeomUtil.sphere_mesh(0.030, Color(0.96, 0.96, 0.94))
-        sclera.position = Vector3(side * 0.048, 0.196, -0.152)
+        var sclera := GeomUtil.sphere_mesh(0.032, Color(0.97, 0.97, 0.95))
+        sclera.position = Vector3(side * 0.048, 0.198, -0.148)
         root.add_child(sclera)
-        var iris := GeomUtil.sphere_mesh(0.018, eye)
-        iris.position = Vector3(side * 0.048, 0.194, -0.168)
+        var iris := GeomUtil.sphere_mesh(0.020, eye)
+        iris.position = Vector3(side * 0.048, 0.196, -0.166)
         root.add_child(iris)
-        var pupil := GeomUtil.sphere_mesh(0.008, Color(0.03, 0.03, 0.03))
-        pupil.position = Vector3(side * 0.048, 0.194, -0.176)
+        var pupil := GeomUtil.sphere_mesh(0.009, Color(0.03, 0.03, 0.03))
+        pupil.position = Vector3(side * 0.048, 0.196, -0.176)
         root.add_child(pupil)
 
-    var scalp := GeomUtil.sphere_mesh(0.154 * head_s, hair)
-    scalp.scale = Vector3(0.92, 0.40, 0.86)
-    scalp.position = Vector3(0.0, 0.318, 0.04)
+    var scalp := GeomUtil.sphere_mesh(0.150 * head_s, hair)
+    scalp.scale = Vector3(0.90, 0.34, 0.72)
+    scalp.position = Vector3(0.0, 0.338, 0.070)
     root.add_child(scalp)
 
     if bool(look.get("hair_long", false)):
         for side in [-1.0, 1.0]:
-            var lock := GeomUtil.sphere_mesh(0.048, hair)
-            lock.scale = Vector3(0.55, 1.35, 0.70)
-            lock.position = Vector3(side * 0.118, 0.168, 0.018)
+            var lock := GeomUtil.sphere_mesh(0.042, hair)
+            lock.scale = Vector3(0.48, 1.20, 0.58)
+            lock.position = Vector3(side * 0.122, 0.175, 0.040)
             root.add_child(lock)
 
     if bool(look.get("beard", false)):
-        var beard := GeomUtil.sphere_mesh(0.082, hair)
-        beard.scale = Vector3(0.90, 0.72, 0.70)
-        beard.position = Vector3(0.0, 0.070, -0.055)
+        var beard := GeomUtil.box_mesh(Vector3(0.130, 0.070, 0.070), hair, 0.90, 0.0)
+        beard.position = Vector3(0.0, 0.062, -0.072)
         root.add_child(beard)
     if bool(look.get("mustache", false)):
-        var stash := GeomUtil.box_mesh(Vector3(0.074, 0.012, 0.018), hair, 0.90, 0.0)
-        stash.position = Vector3(0.0, 0.122, -0.150)
+        var stash := GeomUtil.box_mesh(Vector3(0.068, 0.010, 0.016), hair, 0.90, 0.0)
+        stash.position = Vector3(0.0, 0.118, -0.154)
         root.add_child(stash)
 
-    # Crown only. A brim cylinder reads as a facemask from any camera.
+    # Crown only, high on the skull. Never a brim, never a band.
     if bool(look.get("wear_hat", false)):
-        var dome := GeomUtil.sphere_mesh(0.160 * head_s, look.get("hat"))
-        dome.scale = Vector3(0.96, 0.34, 0.90)
-        dome.position = Vector3(0.0, 0.378, 0.04)
+        var dome := GeomUtil.sphere_mesh(0.152 * head_s, look.get("hat"))
+        dome.scale = Vector3(0.94, 0.30, 0.86)
+        dome.position = Vector3(0.0, 0.392, 0.055)
         root.add_child(dome)
 
 
@@ -469,12 +469,12 @@ func _express() -> void:
         return
     var t := phase * 0.35 + float(look_id % 17) * 0.41
     var blink := 1.0 if fmod(t, 5.4) < 0.16 else 0.0
-    _lid_l.position.y = 0.214 - blink * 0.018
-    _lid_r.position.y = 0.214 - blink * 0.018
+    _lid_l.position.y = 0.218 - blink * 0.016
+    _lid_r.position.y = 0.218 - blink * 0.016
     _lid_l.scale.y = 1.0 + blink * 2.4
     _lid_r.scale.y = 1.0 + blink * 2.4
     if _jaw != null:
-        _jaw.position.y = 0.108 + sin(t * 0.7) * 0.004
+        _jaw.position.y = 0.100 + sin(t * 0.7) * 0.004
     if _mouth != null:
         _mouth.scale.x = 1.0 + sin(t * 0.9) * 0.04
 

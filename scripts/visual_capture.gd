@@ -123,7 +123,7 @@ func _stage_yard_overview() -> void:
 
 func _stage_combat() -> void:
     game.player.visible = true
-    game.player.global_position = Vector3(0.0, 0.03, 11.2)
+    game.player.global_position = Vector3(0.0, 0.03, 11.0)
     game.player.rotation.y = 0.0
     game.player.attack_anim = 0.0
     game.player.attack_duration = 0.38
@@ -136,10 +136,10 @@ func _stage_combat() -> void:
 
     var visible_enemies := _visible_enemies()
     var positions := [
-        Vector3(-1.05, 0.03, 10.55),
-        Vector3(1.12, 0.03, 10.45),
-        Vector3(-1.85, 0.03, 11.45),
-        Vector3(1.95, 0.03, 11.35)
+        Vector3(-1.40, 0.03, 10.15),
+        Vector3(1.45, 0.03, 10.10),
+        Vector3(-2.55, 0.03, 11.25),
+        Vector3(2.60, 0.03, 11.20)
     ]
     for i in mini(visible_enemies.size(), positions.size()):
         var enemy = visible_enemies[i]
@@ -159,7 +159,7 @@ func _stage_combat() -> void:
     game.hud.set_objective("FACES, NOT DISCS", "EACH CREW MEMBER IS A DIFFERENT PERSON")
     game.hud.set_objective_progress(0.45)
     game.hud.set_context("NO BRIM // NO HUBCAPS // EYES FORWARD")
-    _camera(Vector3(0.28, 1.52, 8.55), Vector3(0.04, 1.38, 11.05), 34.0)
+    _camera(Vector3(0.35, 1.92, 6.85), Vector3(0.0, 1.88, 10.9), 40.0)
 
 func _stage_excavator_operator_pov() -> void:
     game.player.visible = false
@@ -341,9 +341,9 @@ func _stage_gait_observables() -> bool:
         "NO FACEMASK // NO KNOCK-KNEES"
     )
     _camera(
-        focus + Vector3(0.18, 1.54, -2.05),
-        focus + Vector3(0.02, 1.42, 0.08),
-        30.0
+        focus + Vector3(0.22, 1.92, -2.85),
+        focus + Vector3(0.0, 1.88, 0.05),
+        32.0
     )
     await _settle_frames(8)
     _capture("07_walk_single_support.png")
@@ -364,9 +364,9 @@ func _stage_gait_observables() -> bool:
         "STANCE WIDTH MATCHES THE HIPS"
     )
     _camera(
-        focus + Vector3(1.95, 1.08, -1.70),
-        focus + Vector3(0.0, 0.78, 0.06),
-        38.0
+        focus + Vector3(2.35, 1.25, -2.20),
+        focus + Vector3(0.0, 1.15, 0.05),
+        42.0
     )
     await _settle_frames(8)
     _capture("08_walk_double_support.png")
