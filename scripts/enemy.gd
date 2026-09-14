@@ -41,6 +41,7 @@ var max_health := 100.0
 var speed := 3.9
 var attack_damage := 14.0
 var attack_reach := 1.68
+var mass := 78.0
 var archetype := GRUNT
 var attack_cooldown := 0.0
 var attack_windup := 0.0
@@ -182,6 +183,7 @@ func _apply_archetype() -> void:
     speed = float(stats.speed)
     attack_damage = float(stats.damage)
     attack_reach = float(stats.reach)
+    mass = float(stats.get("mass", 78.0))
     if archetype == PLATE and _plate == null:
         _build_plate()
 
@@ -261,6 +263,12 @@ func take_hit(force: Vector3, damage: float) -> void:
     attack_windup = 0.0
     attack_landed = false
     velocity += force * float(stats.resistance)
+    if _rig != null and _rig.has_method("apply_body_impact"):
+        _rig.apply_body_impact(
+            fx_dir,
+            incoming * 90.0,
+            global_position + Vector3.UP * 1.0
+        )
     ImpactFx.spawn(
         get_parent(),
         global_position + Vector3.UP * 1.15,
@@ -283,6 +291,35 @@ func take_hit(force: Vector3, damage: float) -> void:
             2.6,
             11
         )
+
+
+func machine_hit(
+        amount: float,
+        direction: Vector3,
+        world_point: Vector3 = Vector3.ZERO
+) -> void:
+    machine_hit_at(
+        amount,
+        direction,
+        world_point,
+        EnergyPartition.nominal_impact_energy(amount)
+    )
+
+
+func machine_hit_at(
+        amount: float,
+        direction: Vector3,
+        world_point: Vector3,
+        impact_energy: float
+) -> void:
+    if dead:
+        return
+    var split: Dictionary = EnergyPartition.split(impact_energy)
+    var absorbed: float = float(split.plastic) + float(split.kinetic) * 0.40
+    var damage := clampf(absorbed / 55.0, 8.0, 110.0)
+    var dir := direction.normalized() if direction.length_squared() > 0.001 else Vector3.FORWARD
+    var impulse := EnergyPartition.kinetic_impulse(mass, impact_energy) / maxf(mass, 1.0)
+    take_hit(dir * minf(impulse, 14.0) + Vector3.UP * minf(impulse * 0.18, 3.2), damage)
 
 
 func _absorb_with_plate(

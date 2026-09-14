@@ -4,19 +4,8 @@ const GeomUtil = preload("res://scripts/geom.gd")
 
 func _ready() -> void:
     name = "YardSurface"
-    _build_asphalt()
     _build_wear()
     _build_route_language()
-
-func _build_asphalt() -> void:
-    var surface := GeomUtil.box_mesh(
-        Vector3(51.0, 0.018, 55.0),
-        Color(0.18, 0.172, 0.158),
-        0.97,
-        0.02
-    )
-    surface.position = Vector3(0.0, 0.012, 0.0)
-    add_child(surface)
 
 func _build_wear() -> void:
     for i in 18:

@@ -262,3 +262,36 @@ func _tick_hijack(delta: float) -> void:
 func _release_load(_with_throw: bool) -> void:
     _grip.release(Vector3.ZERO, false)
     held_load = null
+
+
+## The yard floor is a load the working assembly can spend energy on.
+func work_ground(
+        world_point: Vector3,
+        direction: Vector3,
+        intensity: float,
+        width: float = 1.6
+) -> void:
+    if not is_inside_tree() or intensity < 0.5:
+        return
+    var nodes := get_tree().get_nodes_in_group("yard_substrate")
+    if nodes.is_empty():
+        return
+    var ground: Node = nodes[0]
+    if ground.has_method("cut_and_pile"):
+        ground.cut_and_pile(world_point, direction, intensity, width)
+
+
+func work_gouge(
+        world_point: Vector3,
+        direction: Vector3,
+        intensity: float
+) -> void:
+    if not is_inside_tree() or intensity < 0.5:
+        return
+    var nodes := get_tree().get_nodes_in_group("yard_substrate")
+    if nodes.is_empty():
+        return
+    var ground: Node = nodes[0]
+    if ground.has_method("gouge"):
+        ground.gouge(world_point, direction, intensity)
+

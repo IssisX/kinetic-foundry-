@@ -2,6 +2,7 @@ extends Node3D
 
 const GeomUtil = preload("res://scripts/geom.gd")
 const PhysicsPropScript = preload("res://scripts/physics_prop.gd")
+const YardSubstrateScript = preload("res://scripts/yard_substrate.gd")
 
 func _ready() -> void:
     _build_ground()
@@ -25,6 +26,14 @@ func _build_ground() -> void:
         Vector3(72.0, 1.0, 72.0),
         Color(0.168, 0.160, 0.148)
     )
+    var earth := YardSubstrateScript.new()
+    earth.name = "YardSubstrate"
+    add_child(earth)
+    earth.cut_and_pile(Vector3(12.4, 0.0, 7.2), Vector3(0.18, 0.0, -1.0), 210.0, 2.8)
+    earth.cut_and_pile(Vector3(11.6, 0.0, 6.1), Vector3(0.28, 0.0, -1.0), 160.0, 2.2)
+    earth.cut_and_pile(Vector3(13.1, 0.0, 5.4), Vector3(0.10, 0.0, -1.0), 120.0, 1.8)
+    earth.cut_and_pile(Vector3(-2.2, 0.0, 3.8), Vector3(1.0, 0.0, 0.15), 90.0, 1.6)
+    earth.rebuild()
     for i in 9:
         var patch := GeomUtil.box_mesh(
             Vector3(4.5 + float(i % 3), 0.012, 2.2 + float(i % 4) * 0.6),

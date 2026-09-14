@@ -40,6 +40,7 @@ var _ripper_cooldown := 0.0
 var _telemetry_timer := 0.0
 var _ripper_latched := false
 var _ai_time := 0.0
+var _ground_work_cooldown := 0.0
 
 
 func _ready() -> void:
@@ -149,6 +150,7 @@ func _physics_process(delta: float) -> void:
     _apply_pose()
     _resolve_blade_contacts()
     _resolve_ripper()
+    _scrape_ground(delta)
     _update_telemetry()
 
 
@@ -225,6 +227,35 @@ func _apply_pose() -> void:
         _ripper.rotation.x = lerpf(-0.12, 0.78, ripper_drop)
     if _blade != null:
         _blade_point = _blade.to_global(Vector3(0.0, 0.0, -0.80))
+
+
+func _scrape_ground(delta: float) -> void:
+    _ground_work_cooldown = maxf(0.0, _ground_work_cooldown - delta)
+    var speed := Vector3(velocity.x, 0.0, velocity.z).length()
+    if _ground_work_cooldown > 0.0:
+        return
+    var forward := -global_basis.z
+    if blade_lift < 0.28 and speed > 0.35:
+        var cutting := 1.0 - blade_lift
+        work_ground(
+            _blade_point,
+            forward,
+            speed * 28.0 * cutting,
+            2.6
+        )
+        var drag := cutting * 2.4 * delta
+        velocity.x = move_toward(velocity.x, 0.0, drag)
+        velocity.z = move_toward(velocity.z, 0.0, drag)
+        _ground_work_cooldown = 0.10
+        if hud != null and player_driver != null:
+            hud.set_context("BLADE // CUT AND PILE")
+    if ripper_drop > 0.55 and speed > 0.25 and _ripper != null:
+        work_gouge(
+            _ripper.global_position,
+            global_basis.z * 0.65 + Vector3(0.0, -0.35, 0.0),
+            speed * 22.0
+        )
+        _ground_work_cooldown = 0.10
 
 
 func _shove_slide_bodies() -> void:

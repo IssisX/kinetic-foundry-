@@ -45,6 +45,7 @@ var _safe_boom_angle := -0.24
 var _safe_stick_angle := 0.42
 var _safe_tool_angle := -0.18
 var _safe_arm_yaw := 0.0
+var _ground_work_cooldown := 0.0
 
 func _ready() -> void:
     super()
@@ -176,6 +177,7 @@ func _physics_process(delta: float) -> void:
     _update_tool_motion(delta)
     _update_held_load(delta)
     _resolve_tool_impacts()
+    _scrape_ground(delta)
     _update_damage_fx()
     _update_telemetry()
 
@@ -444,6 +446,26 @@ func _resolve_tool_impacts() -> void:
         elif body is RigidBody3D and not body.freeze:
             body.apply_impulse(impact_dir * minf(force * body.mass * 0.035, 2200.0), body.to_local(_tool.global_position))
             _impact_cooldown = 0.12
+
+
+func _scrape_ground(delta: float) -> void:
+    _ground_work_cooldown = maxf(0.0, _ground_work_cooldown - delta)
+    if _tool == null or _ground_work_cooldown > 0.0:
+        return
+    if _tool.global_position.y > 0.52 or _tool_tip_speed < 0.85:
+        return
+    var direction := (
+        _tool_tip_velocity.normalized()
+        if _tool_tip_velocity.length_squared() > 0.04
+        else -_tool.global_basis.z
+    )
+    work_ground(
+        _tool.global_position,
+        direction,
+        _tool_tip_speed * 16.0,
+        1.25
+    )
+    _ground_work_cooldown = 0.12
 
 
 func _deliver_machine_hit(

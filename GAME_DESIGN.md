@@ -99,6 +99,11 @@ traversal. Damage affects machine capability. Machine failure creates debris.
 Debris becomes cover, weapon, obstacle, load, brace, or traversal geometry.
 Enemy AI and progression operate through these same authorities.
 
+The yard floor is a load. A blade or bucket spends the same energy partition
+on dirt that it spends on steel. Spoil piles ahead, becomes walkable mass,
+and gait samples it. People are loads too: machine mass writes crush and
+limp into the same body the walk solver is posing. Not a ragdoll.
+
 ## First vertical slice
 1. Player moves through an industrial yard on foot.
 2. Player fights human enemies.

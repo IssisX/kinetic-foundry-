@@ -146,8 +146,8 @@ func _stage_combat() -> void:
     game.hud.set_target(game.player.engaged_target)
     game.hud.set_objective("BREAK THE YARD CREW", "TACKLE // COMBO // KICK // GRAB // THROW")
     game.hud.set_objective_progress(0.45)
-    game.hud.set_context("ANALYTIC GAIT // SIDE KICK // HEAVY FINISHER")
-    _camera(Vector3(6.8, 4.8, 16.0), Vector3(0.0, 1.20, 9.7), 60.0)
+    game.hud.set_context("HIPS COUNTER THE SWING // SIDE KICK")
+    _camera(Vector3(5.6, 1.85, 9.55), Vector3(0.0, 1.22, 9.6), 48.0)
 
 func _stage_excavator_operator_pov() -> void:
     game.player.visible = false
@@ -289,7 +289,8 @@ func _stage_gait_observables() -> bool:
         push_error("CAPTURE_GAIT_RIG_MISSING")
         return false
     rig.reset_gait_state()
-    rig.set_gait_debug_enabled(true)
+    # Photos are not a debug overlay. Acceptance still reads get_gait_observables.
+    rig.set_gait_debug_enabled(false)
 
     var walk_speed := 1.28
     var walk_velocity := Vector3(0.0, 0.0, -walk_speed)
@@ -320,17 +321,17 @@ func _stage_gait_observables() -> bool:
     game.hud.set_target(null)
     game.hud.set_health(1.0)
     game.hud.set_objective(
-        "WORLD-SPACE WALK SOLVER",
-        "SINGLE SUPPORT // SWING CLEARANCE // FORWARD KNEE POLE"
+        "WALK THE YARD",
+        "HIPS COUNTER THE SWING // FACE FORWARD"
     )
     game.hud.set_objective_progress(0.72)
     game.hud.set_context(
-        "PLANTED CONTACTS // COM TRANSFER // ANALYTIC IK"
+        "PLANTED CONTACTS // COM TRANSFER"
     )
     _camera(
-        focus + Vector3(4.8, 2.65, -3.8),
-        focus + Vector3(0.0, 1.05, 0.0),
-        46.0
+        focus + Vector3(1.55, 1.58, -2.85),
+        focus + Vector3(0.05, 1.48, -0.08),
+        36.0
     )
     await _settle_frames(8)
     _capture("07_walk_single_support.png")
@@ -343,17 +344,17 @@ func _stage_gait_observables() -> bool:
 
     focus = game.player.global_position
     game.hud.set_objective(
-        "WORLD-SPACE WALK SOLVER",
+        "WALK THE YARD",
         "DOUBLE SUPPORT // HEEL STRIKE // TOE RELEASE"
     )
     game.hud.set_objective_progress(0.86)
     game.hud.set_context(
-        "NO FLIGHT PHASE // SUPPORT BRIDGE // GROUNDED FEET"
+        "NO FLIGHT PHASE // SUPPORT BRIDGE"
     )
     _camera(
-        focus + Vector3(-4.4, 2.45, -3.4),
-        focus + Vector3(0.0, 1.00, 0.0),
-        47.0
+        focus + Vector3(-1.85, 1.52, -2.55),
+        focus + Vector3(-0.05, 1.42, -0.05),
+        38.0
     )
     await _settle_frames(8)
     _capture("08_walk_double_support.png")
@@ -457,8 +458,18 @@ func _stage_dozer_blade_push() -> void:
     dozer.force_update_transform()
     dozer._apply_pose()
     var forward: Vector3 = -dozer.global_basis.z
-    var right: Vector3 = dozer.global_basis.x
     var blade: Vector3 = dozer._blade_point
+    var earth_nodes := get_tree().get_nodes_in_group("yard_substrate")
+    if not earth_nodes.is_empty():
+        var earth: Node = earth_nodes[0]
+        if earth.has_method("cut_and_pile"):
+            earth.cut_and_pile(blade, forward, 240.0, 2.8)
+            earth.cut_and_pile(blade + forward * 1.2, forward, 200.0, 2.4)
+            earth.cut_and_pile(blade + forward * 2.1, forward, 160.0, 2.0)
+            earth.cut_and_pile(blade + dozer.global_basis.x * 0.9, forward, 140.0, 1.8)
+        if earth.has_method("rebuild"):
+            earth.rebuild()
+    var right: Vector3 = dozer.global_basis.x
     var offsets := [
         Vector3(0.0, 0.12, 0.0),
         Vector3(1.05, 0.08, 0.15),

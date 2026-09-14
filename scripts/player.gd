@@ -3,6 +3,7 @@ extends CharacterBody3D
 
 const GeomUtil = preload("res://scripts/geom.gd")
 const HumanoidRigScript = preload("res://scripts/humanoid_motion.gd")
+const EnergyPartition = preload("res://scripts/energy_partition.gd")
 
 signal request_machine_entry(player)
 
@@ -12,6 +13,7 @@ var health := 180.0
 var max_health := 180.0
 var speed := 7.4
 var sprint_speed := 10.2
+var mass := 92.0
 
 # Progression-backed physical affordances.
 var grab_mass_limit := 110.0
@@ -72,6 +74,39 @@ func receive_hazard_hit(damage: float, impulse: Vector3) -> void:
     var hazard_scale: float = 1.0 - clampf(hazard_reduction, 0.0, 0.8)
     receive_enemy_hit(damage * hazard_scale)
     velocity += impulse * (0.55 + hazard_scale * 0.45)
+
+
+func machine_hit(
+        amount: float,
+        direction: Vector3,
+        world_point: Vector3 = Vector3.ZERO
+) -> void:
+    machine_hit_at(
+        amount,
+        direction,
+        world_point,
+        EnergyPartition.nominal_impact_energy(amount)
+    )
+
+
+func machine_hit_at(
+        amount: float,
+        direction: Vector3,
+        world_point: Vector3,
+        impact_energy: float
+) -> void:
+    var split: Dictionary = EnergyPartition.split(impact_energy)
+    var absorbed: float = float(split.plastic) + float(split.kinetic) * 0.40
+    var damage := clampf(absorbed / 70.0, 6.0, 95.0)
+    receive_enemy_hit(damage)
+    var dir := direction.normalized() if direction.length_squared() > 0.001 else Vector3.FORWARD
+    var impulse_speed := EnergyPartition.kinetic_impulse(mass, impact_energy) / maxf(mass, 1.0)
+    velocity += dir * minf(impulse_speed, 16.0) + Vector3.UP * minf(impulse_speed * 0.16, 3.6)
+    if _rig != null and _rig.has_method("apply_body_impact"):
+        _rig.apply_body_impact(dir, impact_energy, world_point)
+    if hud != null and hud.has_method("set_context"):
+        hud.set_context("MACHINE MASS // BODY IS THE LOAD")
+
 
 ## Oil or water underfoot is a real coupling nobody was reading: the
 ## material substrate already tracked it (SurfaceState.traction_scale),
