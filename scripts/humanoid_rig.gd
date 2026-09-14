@@ -2,6 +2,11 @@ extends Node3D
 
 const GeomUtil = preload("res://scripts/geom.gd")
 
+## Girth only, not height: applied to torso width/depth and limb capsule
+## radii so the crew reads as a bit less gaunt without changing how tall or
+## long anything is.
+const BUILD_BULK := 1.14
+
 var player_style := false
 var look_id := 0
 var role := 0
@@ -131,10 +136,10 @@ func _build() -> void:
     pelvis.position = Vector3(0.0, 0.94, 0.0)
     add_child(pelvis)
 
-    var hips := GeomUtil.box_mesh(Vector3(0.36, 0.22, 0.20), cloth_dark, 0.90, 0.04)
+    var hips := GeomUtil.box_mesh(Vector3(0.36 * BUILD_BULK, 0.22, 0.20 * BUILD_BULK), cloth_dark, 0.90, 0.04)
     hips.position.y = 0.00
     pelvis.add_child(hips)
-    var belt := GeomUtil.box_mesh(Vector3(0.38, 0.05, 0.22), gear, 0.90, 0.10)
+    var belt := GeomUtil.box_mesh(Vector3(0.38 * BUILD_BULK, 0.05, 0.22 * BUILD_BULK), gear, 0.90, 0.10)
     belt.position.y = 0.12
     pelvis.add_child(belt)
 
@@ -149,7 +154,7 @@ func _build() -> void:
     spine.add_child(torso)
 
     var chest := GeomUtil.box_mesh(
-        Vector3(0.40 if player_style else 0.36, 0.36, 0.20),
+        Vector3((0.40 if player_style else 0.36) * BUILD_BULK, 0.36, 0.20 * BUILD_BULK),
         cloth,
         0.86,
         0.03
@@ -157,7 +162,7 @@ func _build() -> void:
     chest.position = Vector3(0.0, 0.40, 0.01)
     torso.add_child(chest)
     var gut := GeomUtil.box_mesh(
-        Vector3(0.36 if player_style else 0.33, 0.24, 0.18),
+        Vector3((0.36 if player_style else 0.33) * BUILD_BULK, 0.24, 0.18 * BUILD_BULK),
         cloth,
         0.88,
         0.03
@@ -318,10 +323,10 @@ func _build_arm(parent: Node3D, side: float, cloth: Color, gear: Color, skin: Co
     shoulder.position = Vector3(side * 0.34, 0.54, 0.0)
     parent.add_child(shoulder)
 
-    var deltoid := GeomUtil.box_mesh(Vector3(0.14, 0.14, 0.14), cloth, 0.86, 0.04)
+    var deltoid := GeomUtil.box_mesh(Vector3(0.14, 0.14, 0.14) * BUILD_BULK, cloth, 0.86, 0.04)
     shoulder.add_child(deltoid)
 
-    var upper := GeomUtil.capsule_mesh(0.055, 0.46, cloth)
+    var upper := GeomUtil.capsule_mesh(0.055 * BUILD_BULK, 0.46, cloth)
     upper.position.y = -0.22
     shoulder.add_child(upper)
 
@@ -333,7 +338,7 @@ func _build_arm(parent: Node3D, side: float, cloth: Color, gear: Color, skin: Co
     var joint := GeomUtil.sphere_mesh(0.052, cloth)
     elbow.add_child(joint)
 
-    var forearm := GeomUtil.capsule_mesh(0.046, 0.40, cloth)
+    var forearm := GeomUtil.capsule_mesh(0.046 * BUILD_BULK, 0.40, cloth)
     forearm.position.y = -0.18
     elbow.add_child(forearm)
 
@@ -361,7 +366,7 @@ func _build_leg(parent: Node3D, side: float, cloth: Color, boot: Color) -> Node3
     hip.position = Vector3(side * 0.13, -0.08, 0.0)
     parent.add_child(hip)
 
-    var thigh := GeomUtil.capsule_mesh(0.078, 0.50, cloth)
+    var thigh := GeomUtil.capsule_mesh(0.078 * BUILD_BULK, 0.50, cloth)
     thigh.position.y = -0.22
     hip.add_child(thigh)
 
@@ -373,7 +378,7 @@ func _build_leg(parent: Node3D, side: float, cloth: Color, boot: Color) -> Node3
     var knee_joint := GeomUtil.sphere_mesh(0.062, cloth)
     knee.add_child(knee_joint)
 
-    var shin := GeomUtil.capsule_mesh(0.058, 0.48, cloth)
+    var shin := GeomUtil.capsule_mesh(0.058 * BUILD_BULK, 0.48, cloth)
     shin.position.y = -0.22
     knee.add_child(shin)
 

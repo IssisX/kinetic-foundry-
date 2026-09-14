@@ -48,11 +48,6 @@ const AI_ATTACK_DAMAGE := 26.0
 ## the "smash down at the player" motion never reads as digging into dirt.
 const AI_STRIKE_STICK := -0.20
 const AI_STRIKE_TOOL := -1.0
-## Past this distance from the machine's own work_anchor (set once in
-## machine_base.gd on ready), it gives up the chase and returns home instead
-## of dragging itself across the whole yard after the player - the original
-## "follows me everywhere" complaint, distinct from whether it can fight.
-const AI_LEASH_RADIUS := 13.5
 
 var _ai_attack_windup := 0.0
 var _ai_attack_cooldown := 0.0
@@ -303,10 +298,19 @@ func _player_control(delta: float) -> void:
     stick_angle = clampf(stick_angle, -0.55, 1.00)
     tool_angle = clampf(tool_angle, -1.0, 0.72)
 
+## Rooted machine, not a vehicle: an excavator does not chase anyone across
+## a yard, and a track-driven approach was the actual source of the "this
+## reads as getting run over, not attacked" complaint - the machine would
+## often clip the player closing distance, well before the deliberate
+## windup/strike ever got to run, so what landed read as incidental physics
+## contact rather than a real attack. Zero velocity is ever assigned here now.
+## The only way this machine can hurt anyone is the explicit, telegraphed
+## _step_ai_strike() damage call below, and it can only reach someone who has
+## walked within AI_STRIKE_RANGE of where it already stands.
 func _enemy_control(delta: float) -> void:
+    velocity.x = move_toward(velocity.x, 0.0, 18.0 * delta)
+    velocity.z = move_toward(velocity.z, 0.0, 18.0 * delta)
     if is_hijack_in_progress():
-        velocity.x = move_toward(velocity.x, 0.0, 18.0 * delta)
-        velocity.z = move_toward(velocity.z, 0.0, 18.0 * delta)
         return
     ai_time += delta
     _ai_attack_cooldown = maxf(0.0, _ai_attack_cooldown - delta)
@@ -321,52 +325,17 @@ func _enemy_control(delta: float) -> void:
         _step_ai_strike(delta, target, distance, to_target)
         return
 
-    # Territory, not a leash on the target: past AI_LEASH_RADIUS from its own
-    # work_anchor (machine_base.gd), give up the chase and go home instead of
-    # dragging itself across the whole yard - that was the reported bug, not
-    # the attack itself. Inside the leash, the full engage-and-strike logic
-    # below is unchanged and untouched by this radius.
-    var home := work_anchor if work_anchor.length_squared() > 0.01 else global_position
-    var to_home: Vector3 = home - global_position
-    to_home.y = 0.0
-    if to_home.length() > AI_LEASH_RADIUS:
-        var desired_home: float = atan2(-to_home.x, -to_home.z)
-        rotation.y = lerp_angle(rotation.y, desired_home, 0.02)
-        var forward_home := -global_basis.z
-        var track_ratio := maxf(get_track_ratio(), 0.22)
-        velocity.x = forward_home.x * 0.28 * drive_speed * track_ratio
-        velocity.z = forward_home.z * 0.28 * drive_speed * track_ratio
-        var hydro_home := maxf(get_hydraulic_ratio(), 0.24)
-        # Same verified-safe idle centers as the engaged sway below - a
-        # returning machine gets no exemption from the ground-clearance proof.
-        arm_yaw = sin(ai_time * 0.22) * 0.38 * hydro_home
-        boom_angle = 0.0 + sin(ai_time * 0.18) * 0.10 * hydro_home
-        stick_angle = 0.30 + sin(ai_time * 0.20) * 0.10 * hydro_home
-        tool_angle = -0.15 + sin(ai_time * 0.16) * 0.22 * hydro_home
-        return
-
-    if distance > 0.1:
-        var desired: float = atan2(-to_target.x, -to_target.z)
-        rotation.y = lerp_angle(rotation.y, desired, 0.018)
-
-    var forward: Vector3 = -global_basis.z
-    var throttle: float = 1.0 if distance > 7.0 else 0.0
-    var track_ratio := maxf(get_track_ratio(), 0.22)
-    velocity.x = forward.x * throttle * drive_speed * 0.48 * track_ratio
-    velocity.z = forward.z * throttle * drive_speed * 0.48 * track_ratio
-
-    if distance <= AI_STRIKE_RANGE and _ai_attack_cooldown <= 0.0:
-        _ai_attack_windup = AI_ATTACK_WINDUP
-        _ai_attack_landed = false
-        _ai_attack_cooldown = AI_ATTACK_COOLDOWN
-        return
+    if distance <= AI_STRIKE_RANGE:
+        if distance > 0.1:
+            var desired: float = atan2(-to_target.x, -to_target.z)
+            rotation.y = lerp_angle(rotation.y, desired, 0.018)
+        if _ai_attack_cooldown <= 0.0:
+            _ai_attack_windup = AI_ATTACK_WINDUP
+            _ai_attack_landed = false
+            _ai_attack_cooldown = AI_ATTACK_COOLDOWN
+            return
 
     var hydro := maxf(get_hydraulic_ratio(), 0.24) * actuator_speed_ratio()
-    # Kept raised and gently swaying while it walks: this is a machine
-    # closing distance, not one mid-dig, so the "operator working the
-    # controls" idle sway stays clear of the ground instead of dragging the
-    # bucket the whole way there.
-    #
     # These centers are not a guess: boom_angle's sign runs the opposite way
     # from what it looks like it should (more negative digs the tool DOWN,
     # not up), and it and stick_angle interact rather than lift independently.
