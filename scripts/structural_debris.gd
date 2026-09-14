@@ -157,7 +157,11 @@ func configure_fragment(
     tool.generate_normals()
     var mesh := MeshInstance3D.new()
     mesh.mesh = tool.commit()
-    var material := GeomUtil.material(color, 0.92, 0.30)
+    # Hull triangles carry normals but no UVs, so there is no tangent array for
+    # a normal map to resolve against.
+    var material := GeomUtil.material(
+        color, 0.92, 0.30, GeomUtil.Detail.NONE
+    )
     material.cull_mode = BaseMaterial3D.CULL_DISABLED
     mesh.material_override = material
     add_child(mesh)

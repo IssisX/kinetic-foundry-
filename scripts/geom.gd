@@ -1,15 +1,25 @@
 class_name Geom
 extends RefCounted
 
+const Detail = preload("res://scripts/surface_detail.gd")
+
+## detail < 0 lets surface_detail.gd pick a class from roughness and metallic,
+## which is what every existing call site relies on. Pass Detail.NONE for a mesh
+## built without UVs or tangents - normal mapping has no frame to work in there.
 static func material(
         color: Color,
         roughness: float = 0.78,
-        metallic: float = 0.0
+        metallic: float = 0.0,
+        detail: int = -1
 ) -> StandardMaterial3D:
     var mat := StandardMaterial3D.new()
     mat.albedo_color = color
     mat.roughness = roughness
     mat.metallic = metallic
+    Detail.apply(
+        mat,
+        Detail.infer(roughness, metallic) if detail < 0 else detail
+    )
     return mat
 
 static func emissive_material(
@@ -42,13 +52,14 @@ static func box_mesh(
         size: Vector3,
         color: Color,
         roughness: float = 0.78,
-        metallic: float = 0.0
+        metallic: float = 0.0,
+        detail: int = -1
 ) -> MeshInstance3D:
     var mesh := BoxMesh.new()
     mesh.size = size
     var node := MeshInstance3D.new()
     node.mesh = mesh
-    node.material_override = material(color, roughness, metallic)
+    node.material_override = material(color, roughness, metallic, detail)
     return node
 
 static func cylinder_mesh(
@@ -56,7 +67,8 @@ static func cylinder_mesh(
         height: float,
         color: Color,
         roughness: float = 0.78,
-        metallic: float = 0.0
+        metallic: float = 0.0,
+        detail: int = -1
 ) -> MeshInstance3D:
     var mesh := CylinderMesh.new()
     mesh.top_radius = radius
@@ -65,32 +77,34 @@ static func cylinder_mesh(
     mesh.radial_segments = 16
     var node := MeshInstance3D.new()
     node.mesh = mesh
-    node.material_override = material(color, roughness, metallic)
+    node.material_override = material(color, roughness, metallic, detail)
     return node
 
 static func sphere_mesh(
         radius: float,
-        color: Color
+        color: Color,
+        detail: int = -1
 ) -> MeshInstance3D:
     var mesh := SphereMesh.new()
     mesh.radius = radius
     mesh.height = radius * 2.0
     var node := MeshInstance3D.new()
     node.mesh = mesh
-    node.material_override = material(color)
+    node.material_override = material(color, 0.78, 0.0, detail)
     return node
 
 static func capsule_mesh(
         radius: float,
         height: float,
-        color: Color
+        color: Color,
+        detail: int = -1
 ) -> MeshInstance3D:
     var mesh := CapsuleMesh.new()
     mesh.radius = radius
     mesh.height = height
     var node := MeshInstance3D.new()
     node.mesh = mesh
-    node.material_override = material(color)
+    node.material_override = material(color, 0.78, 0.0, detail)
     return node
 
 static func add_box_collision(
@@ -135,12 +149,13 @@ static func static_box(
         name_text: String,
         position: Vector3,
         size: Vector3,
-        color: Color
+        color: Color,
+        detail: int = -1
 ) -> StaticBody3D:
     var body := StaticBody3D.new()
     body.name = name_text
     body.position = position
     parent.add_child(body)
-    body.add_child(box_mesh(size, color))
+    body.add_child(box_mesh(size, color, 0.78, 0.0, detail))
     add_box_collision(body, size)
     return body

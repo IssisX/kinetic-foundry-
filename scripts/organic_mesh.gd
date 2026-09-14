@@ -2,10 +2,15 @@ extends RefCounted
 
 const GeomUtil = preload("res://scripts/geom.gd")
 
+## No detail class: loft_mesh emits normals but no UVs, so SurfaceTool commits
+## the mesh without a tangent array and a normal map would have no frame to be
+## expressed in.
 static func loft_node(rings: Array, color: Color, radial_segments: int = 14, roughness: float = 0.78) -> MeshInstance3D:
     var node := MeshInstance3D.new()
     node.mesh = loft_mesh(rings, radial_segments)
-    node.material_override = GeomUtil.material(color, roughness, 0.0)
+    node.material_override = GeomUtil.material(
+        color, roughness, 0.0, GeomUtil.Detail.NONE
+    )
     return node
 
 static func loft_mesh(rings: Array, radial_segments: int = 14) -> ArrayMesh:
