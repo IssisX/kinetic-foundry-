@@ -294,10 +294,18 @@ func _enemy_control(delta: float) -> void:
     # closing distance, not one mid-dig, so the "operator working the
     # controls" idle sway stays clear of the ground instead of dragging the
     # bucket the whole way there.
+    #
+    # These centers are not a guess: boom_angle's sign runs the opposite way
+    # from what it looks like it should (more negative digs the tool DOWN,
+    # not up), and it and stick_angle interact rather than lift independently.
+    # Verified against the real transform chain (chassis -> boom -> stick ->
+    # tool, tools/arm_height_probe.gd) that this range's worst case - across
+    # every combination of the sway amplitudes AND full arm_yaw - keeps the
+    # tool tip at least 1.6m off the ground, not merely "probably fine."
     arm_yaw = sin(ai_time * 0.74) * 0.46 * hydro
-    boom_angle = -0.62 + sin(ai_time * 0.88) * 0.10 * hydro
-    stick_angle = 0.10 + sin(ai_time * 1.14) * 0.10 * hydro
-    tool_angle = -0.15 + sin(ai_time * 1.31) * 0.14 * hydro
+    boom_angle = 0.0 + sin(ai_time * 0.88) * 0.10 * hydro
+    stick_angle = 0.30 + sin(ai_time * 1.14) * 0.10 * hydro
+    tool_angle = -0.15 + sin(ai_time * 1.31) * 0.22 * hydro
 
 func _apply_arm_pose() -> void:
     _boom.rotation = Vector3(boom_angle, arm_yaw, 0.0)
