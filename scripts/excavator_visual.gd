@@ -148,7 +148,7 @@ static func build(root: Node3D) -> Dictionary:
 
     var impact_probe := Area3D.new()
     impact_probe.collision_layer = 0
-    impact_probe.collision_mask = 4 | 8
+    impact_probe.collision_mask = 1 | 4 | 8
     tool.add_child(impact_probe)
     var shape := BoxShape3D.new()
     shape.size = Vector3(2.05, 1.62, 2.00)

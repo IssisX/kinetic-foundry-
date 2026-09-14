@@ -27,6 +27,28 @@ const FULL_ACTUATOR_RATE := 2.4
 ## cost of the 6 this used to run.
 const POSE_CORRECTION_ITERATIONS := 4
 
+## An enemy-driven excavator used to just idle-sway its arm and park near
+## the player forever - it had no deliberate attack at all, only whatever
+## the passive hard-contact system happened to graze, which itself could
+## not reach the player (see the two fixes in _react_to_arm_contacts and
+## _resolve_tool_impacts). This is a real windup/strike cycle, the same
+## shape every humanoid archetype already uses, so the machine actually
+## does something once it closes distance instead of just arriving.
+const AI_STRIKE_RANGE := 5.5
+const AI_ATTACK_WINDUP := 0.55
+const AI_ATTACK_COOLDOWN := 1.6
+const AI_ATTACK_DAMAGE := 26.0
+## Stick/tool targets for the strike swing. boom is held at 0.0 throughout -
+## verified (tools/arm_height_probe.gd) that sweeping stick and tool alone
+## across this envelope never brings the tip within 0.3m of the ground, so
+## the "smash down at the player" motion never reads as digging into dirt.
+const AI_STRIKE_STICK := -0.20
+const AI_STRIKE_TOOL := -1.0
+
+var _ai_attack_windup := 0.0
+var _ai_attack_cooldown := 0.0
+var _ai_attack_landed := false
+
 var _demand_boom := 0.0
 var _demand_stick := 0.0
 var _demand_tool := 0.0
@@ -276,19 +298,33 @@ func _enemy_control(delta: float) -> void:
         velocity.z = move_toward(velocity.z, 0.0, 18.0 * delta)
         return
     ai_time += delta
+    _ai_attack_cooldown = maxf(0.0, _ai_attack_cooldown - delta)
     var target := get_tree().get_first_node_in_group("player")
     if target == null:
         return
     var to_target: Vector3 = target.global_position - global_position
     to_target.y = 0.0
-    if to_target.length() > 0.1:
+    var distance := to_target.length()
+    if distance > 0.1:
         var desired: float = atan2(-to_target.x, -to_target.z)
         rotation.y = lerp_angle(rotation.y, desired, 0.018)
+
+    if _ai_attack_windup > 0.0:
+        _step_ai_strike(delta, target, distance, to_target)
+        return
+
     var forward: Vector3 = -global_basis.z
-    var throttle: float = 1.0 if to_target.length() > 7.0 else 0.0
+    var throttle: float = 1.0 if distance > 7.0 else 0.0
     var track_ratio := maxf(get_track_ratio(), 0.22)
     velocity.x = forward.x * throttle * drive_speed * 0.48 * track_ratio
     velocity.z = forward.z * throttle * drive_speed * 0.48 * track_ratio
+
+    if distance <= AI_STRIKE_RANGE and _ai_attack_cooldown <= 0.0:
+        _ai_attack_windup = AI_ATTACK_WINDUP
+        _ai_attack_landed = false
+        _ai_attack_cooldown = AI_ATTACK_COOLDOWN
+        return
+
     var hydro := maxf(get_hydraulic_ratio(), 0.24) * actuator_speed_ratio()
     # Kept raised and gently swaying while it walks: this is a machine
     # closing distance, not one mid-dig, so the "operator working the
@@ -306,6 +342,37 @@ func _enemy_control(delta: float) -> void:
     boom_angle = 0.0 + sin(ai_time * 0.88) * 0.10 * hydro
     stick_angle = 0.30 + sin(ai_time * 1.14) * 0.10 * hydro
     tool_angle = -0.15 + sin(ai_time * 1.31) * 0.22 * hydro
+
+
+## Chassis holds still and the arm sweeps stick+tool through a full curl
+## while boom stays at 0.0 - verified to keep 0.3m of ground clearance even
+## at the bottom of the swing, so this reads as a smash rather than a dig.
+## Damage is applied directly at the bottom of the swing rather than left to
+## the passive contact system, the same way every humanoid archetype's own
+## windup->strike works: reliable regardless of what the physics query does
+## or does not happen to overlap that frame.
+func _step_ai_strike(
+        delta: float,
+        target: Node3D,
+        distance: float,
+        to_target: Vector3
+) -> void:
+    velocity.x = move_toward(velocity.x, 0.0, 24.0 * delta)
+    velocity.z = move_toward(velocity.z, 0.0, 24.0 * delta)
+    var previous := _ai_attack_windup
+    _ai_attack_windup = maxf(0.0, _ai_attack_windup - delta)
+    var swing_t := clampf(1.0 - _ai_attack_windup / AI_ATTACK_WINDUP, 0.0, 1.0)
+    var eased := sin(swing_t * PI * 0.5)
+    boom_angle = 0.0
+    arm_yaw = 0.0
+    stick_angle = lerpf(0.30, AI_STRIKE_STICK, eased)
+    tool_angle = lerpf(-0.15, AI_STRIKE_TOOL, eased)
+    if previous > 0.12 and _ai_attack_windup <= 0.12 and not _ai_attack_landed:
+        _ai_attack_landed = true
+        if distance <= AI_STRIKE_RANGE * 1.15 and target.has_method("receive_enemy_hit"):
+            target.receive_enemy_hit(AI_ATTACK_DAMAGE)
+            if target is CharacterBody3D and to_target.length_squared() > 0.01:
+                target.velocity += to_target.normalized() * 3.2 + Vector3.UP * 1.6
 
 func _apply_arm_pose() -> void:
     _boom.rotation = Vector3(boom_angle, arm_yaw, 0.0)
@@ -397,6 +464,16 @@ func _react_to_arm_contacts(contacts: Array[Node]) -> void:
                 _tool.global_position
             )
             damaged = true
+        # Neither a structure (machine_hit) nor a RigidBody prop or corpse
+        # (take_hit): the player is a CharacterBody3D and only answers to
+        # this. Without it the arm could detect the player as a hard
+        # obstacle to steer around and never actually be able to hurt them.
+        elif collider.has_method("receive_hazard_hit"):
+            collider.receive_hazard_hit(
+                clampf(force * 0.35, 12.0, 60.0),
+                direction * clampf(force * 0.15, 4.0, 20.0) + Vector3.UP * 3.0
+            )
+            damaged = true
     velocity -= direction * minf(force * 0.010, 1.6)
     _arm_contact_cooldown = 0.12 if damaged else 0.07
     if hud != null and player_driver != null:
@@ -472,6 +549,12 @@ func _resolve_tool_impacts() -> void:
         elif body.has_method("take_hit"):
             var push := impact_dir * (10.0 + minf(_tool_tip_speed, 12.0)) + Vector3.UP * 4.5
             body.take_hit(push, 42.0 + minf(_tool_tip_speed, 12.0) * 1.2)
+            _impact_cooldown = 0.15
+        elif body.has_method("receive_hazard_hit"):
+            body.receive_hazard_hit(
+                42.0 + minf(_tool_tip_speed, 12.0) * 1.2,
+                impact_dir * (10.0 + minf(_tool_tip_speed, 12.0)) + Vector3.UP * 4.5
+            )
             _impact_cooldown = 0.15
         elif body is RigidBody3D and not body.freeze:
             body.apply_impulse(impact_dir * minf(force * body.mass * 0.035, 2200.0), body.to_local(_tool.global_position))

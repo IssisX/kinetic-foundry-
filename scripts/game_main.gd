@@ -15,6 +15,7 @@ const CaptureRunnerScene = preload("res://scripts/visual_capture.gd")
 const CraneCheckScene = preload("res://scripts/crane_check.gd")
 const EnemyCheckScene = preload("res://scripts/enemy_check.gd")
 const ProcessCheckScene = preload("res://scripts/process_check.gd")
+const CombatCheckScene = preload("res://scripts/combat_check.gd")
 const LoadPathCouplerScene = preload(
     "res://scripts/load_path_coupler.gd"
 )
@@ -56,6 +57,10 @@ func _ready() -> void:
         var process_check := ProcessCheckScene.new()
         add_child(process_check)
         process_check.begin(self)
+    elif OS.get_environment("KF_COMBAT_CHECK") == "1":
+        var combat_check := CombatCheckScene.new()
+        add_child(combat_check)
+        combat_check.begin(self)
 
 func _process(delta: float) -> void:
     if OS.get_environment("KF_CAPTURE") == "1":
