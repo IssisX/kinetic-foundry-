@@ -34,7 +34,6 @@ func _build() -> void:
     var accent := Color(0.48, 0.29, 0.065) if player_style else Color(0.72, 0.49, 0.07)
     var skin := Color(0.62, 0.46, 0.35) if player_style else Color(0.54, 0.41, 0.33)
     var gear := Color(0.085, 0.10, 0.095)
-    var steel := Color(0.18, 0.20, 0.19)
 
     pelvis = Node3D.new()
     pelvis.position = Vector3(0.0, 0.94, 0.0)
@@ -62,10 +61,10 @@ func _build() -> void:
     shoulder_girdle.position = Vector3(0.0, 0.67, 0.0)
     torso.add_child(shoulder_girdle)
 
-    var chest_plate := GeomUtil.cylinder_mesh(0.31, 0.085, accent, 0.78, 0.07)
+    var chest_plate := GeomUtil.cylinder_mesh(0.24, 0.07, accent, 0.78, 0.07)
     chest_plate.rotation.x = PI * 0.5
     chest_plate.scale = Vector3(1.30, 1.0, 0.78)
-    chest_plate.position = Vector3(0.0, 0.43, -0.29)
+    chest_plate.position = Vector3(0.0, 0.43, -0.21)
     torso.add_child(chest_plate)
 
     var abdomen_pad := GeomUtil.capsule_mesh(0.22, 0.37, gear)
@@ -110,11 +109,6 @@ func _build() -> void:
     brim.scale = Vector3(1.0, 1.0, 0.62)
     brim.position = Vector3(0.0, 0.35, -0.23)
     head_root.add_child(brim)
-
-    var face_guard := GeomUtil.capsule_mesh(0.035, 0.32, steel)
-    face_guard.rotation.z = PI * 0.5
-    face_guard.position = Vector3(0.0, 0.25, -0.225)
-    head_root.add_child(face_guard)
 
     arm_l = _build_arm(torso, -1.0, cloth, gear, skin)
     arm_r = _build_arm(torso, 1.0, cloth, gear, skin)

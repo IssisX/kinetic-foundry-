@@ -43,6 +43,14 @@ const MAX_SUBSTEPS := 16
 var nodes: Array[Dictionary] = []
 var edges: Array[Dictionary] = []
 
+## Which edges touch each node, kept current as edges are added. The graph
+## is tiny (single digits of nodes) but this is rebuilt every substep, and a
+## per-node scan of every edge is the wrong complexity for a topology that
+## never changes shape after setup - only aperture and rupture area move.
+var _node_edges: Array[Array] = []
+var _net_scratch: Array[float] = []
+var _inflow_scratch: Array[float] = []
+
 var _ambient_index := -1
 var _ids: Dictionary = {}
 var _total_leak_flow := 0.0
@@ -69,6 +77,7 @@ func _init() -> void:
         "pump_source": -1,
         "pump_flow": 0.0
     })
+    _node_edges.append([])
     _ids["ambient"] = _ambient_index
 
 
@@ -107,6 +116,7 @@ func add_node(
         "pump_source": -1,
         "pump_flow": 0.0
     })
+    _node_edges.append([])
     _ids[id] = index
     return index
 
@@ -154,6 +164,8 @@ func add_edge(
         "orifice_area": 0.0,
         "open": false
     })
+    _node_edges[a].append(index)
+    _node_edges[b].append(index)
     return index
 
 
@@ -329,9 +341,8 @@ func _substep_count(delta: float) -> int:
         if bool(node.fixed):
             continue
         var conductance_sum := 0.0
-        for edge in edges:
-            if int(edge.a) != i and int(edge.b) != i:
-                continue
+        for edge_index in _node_edges[i]:
+            var edge := edges[edge_index]
             conductance_sum += float(edge.conductance) * float(edge.aperture)
             conductance_sum += _orifice_conductance(edge, i)
         if conductance_sum <= 0.0:
@@ -366,13 +377,17 @@ func _orifice_conductance(edge: Dictionary, node_index: int) -> float:
 
 
 func _integrate(delta: float) -> void:
-    var net: Array[float] = []
-    net.resize(nodes.size())
+    # Scratch arrays are kept between calls rather than reallocated every
+    # substep - up to MAX_SUBSTEPS times a frame, forever - since the node
+    # count only changes at setup.
+    if _net_scratch.size() != nodes.size():
+        _net_scratch.resize(nodes.size())
+        _inflow_scratch.resize(nodes.size())
+    var net := _net_scratch
     # Inflow is tracked separately from net because they answer different
     # questions: net decides pressure, arriving flow decides whether a
     # consumer is actually being fed at the rate it asked for.
-    var inflow: Array[float] = []
-    inflow.resize(nodes.size())
+    var inflow := _inflow_scratch
     for i in net.size():
         net[i] = 0.0
         inflow[i] = 0.0

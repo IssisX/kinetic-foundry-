@@ -489,7 +489,7 @@ func _resolve_arm_contact_pose() -> void:
     var low := 0.0
     var high := 1.0
     var best := 0.0
-    for _i in 6:
+    for _i in POSE_CORRECTION_ITERATIONS:
         var mid := (low + high) * 0.5
         _set_interpolated_arm_pose(
             target_boom,

@@ -20,6 +20,13 @@ var track_health := 320.0
 ## counts as asking the supply for everything it has.
 const FULL_ACTUATOR_RATE := 2.4
 
+## Bisection steps for backing the arm off a hard contact. Each one is a
+## fresh physics shape query per arm segment, run every physics frame the
+## arm is touching anything - 4 gets pose error under 7% of the swept
+## travel, which is well below what's visible, for two-thirds the query
+## cost of the 6 this used to run.
+const POSE_CORRECTION_ITERATIONS := 4
+
 var _demand_boom := 0.0
 var _demand_stick := 0.0
 var _demand_tool := 0.0
@@ -283,10 +290,14 @@ func _enemy_control(delta: float) -> void:
     velocity.x = forward.x * throttle * drive_speed * 0.48 * track_ratio
     velocity.z = forward.z * throttle * drive_speed * 0.48 * track_ratio
     var hydro := maxf(get_hydraulic_ratio(), 0.24) * actuator_speed_ratio()
+    # Kept raised and gently swaying while it walks: this is a machine
+    # closing distance, not one mid-dig, so the "operator working the
+    # controls" idle sway stays clear of the ground instead of dragging the
+    # bucket the whole way there.
     arm_yaw = sin(ai_time * 0.74) * 0.46 * hydro
-    boom_angle = -0.35 + sin(ai_time * 0.88) * 0.18 * hydro
-    stick_angle = 0.30 + sin(ai_time * 1.14) * 0.22 * hydro
-    tool_angle = -0.15 + sin(ai_time * 1.31) * 0.22 * hydro
+    boom_angle = -0.62 + sin(ai_time * 0.88) * 0.10 * hydro
+    stick_angle = 0.10 + sin(ai_time * 1.14) * 0.10 * hydro
+    tool_angle = -0.15 + sin(ai_time * 1.31) * 0.14 * hydro
 
 func _apply_arm_pose() -> void:
     _boom.rotation = Vector3(boom_angle, arm_yaw, 0.0)
@@ -323,7 +334,7 @@ func _resolve_arm_contact_pose() -> void:
     var low := 0.0
     var high := 1.0
     var best := 0.0
-    for _i in 6:
+    for _i in POSE_CORRECTION_ITERATIONS:
         var mid := (low + high) * 0.5
         _set_interpolated_arm_pose(target_boom, target_stick, target_tool, target_yaw, mid)
         if _collect_hard_arm_contacts().is_empty():
